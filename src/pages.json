@@ -1,0 +1,65 @@
+{
+  "pages": [
+    { "path": "pages/home/index", "style": { "navigationBarTitleText": "经营管理端", "enablePullDownRefresh": true } },
+    { "path": "pages/sales/list", "style": { "navigationBarTitleText": "销售单据", "enablePullDownRefresh": true } },
+    { "path": "pages/report/index", "style": { "navigationBarTitleText": "报表", "enablePullDownRefresh": true } },
+    { "path": "pages/purchase/index", "style": { "navigationBarTitleText": "采购单据", "enablePullDownRefresh": true } },
+    { "path": "pages/my/index", "style": { "navigationBarTitleText": "我的" } },
+
+    { "path": "pages/sales/detail", "style": { "navigationBarTitleText": "销售单详情" } },
+    { "path": "pages/sales/edit", "style": { "navigationBarTitleText": "销售单" } },
+    { "path": "pages/purchase/detail", "style": { "navigationBarTitleText": "采购单详情" } },
+    { "path": "pages/purchase/edit", "style": { "navigationBarTitleText": "采购单" } },
+    { "path": "pages/report/reconcile", "style": { "navigationBarTitleText": "往来对账单" } },
+    { "path": "pages/report/goods", "style": { "navigationBarTitleText": "客户货品明细" } },
+    { "path": "pages/report/receivable", "style": { "navigationBarTitleText": "应收明细", "enablePullDownRefresh": true } },
+    { "path": "pages/customer/list", "style": { "navigationBarTitleText": "客户", "enablePullDownRefresh": true } },
+    { "path": "pages/customer/detail", "style": { "navigationBarTitleText": "客户经营档案" } },
+    { "path": "pages/customer/edit", "style": { "navigationBarTitleText": "客户资料" } },
+    { "path": "pages/product/list", "style": { "navigationBarTitleText": "商品资料", "enablePullDownRefresh": true } },
+    { "path": "pages/product/detail", "style": { "navigationBarTitleText": "商品资料" } },
+    { "path": "pages/product/edit", "style": { "navigationBarTitleText": "商品资料" } },
+    { "path": "pages/supplier/list", "style": { "navigationBarTitleText": "供应商资料", "enablePullDownRefresh": true } },
+    { "path": "pages/supplier/detail", "style": { "navigationBarTitleText": "供应商档案" } },
+    { "path": "pages/supplier/edit", "style": { "navigationBarTitleText": "供应商资料" } },
+    { "path": "pages/inventory/index", "style": { "navigationBarTitleText": "库存", "enablePullDownRefresh": true } },
+    { "path": "pages/inventory/flow", "style": { "navigationBarTitleText": "收发存明细" } },
+    { "path": "pages/print/index", "style": { "navigationBarTitleText": "打印" } },
+    { "path": "pages/print/preview", "style": { "navigationBarTitleText": "单据预览" } },
+    { "path": "pages/settings/config", "style": { "navigationBarTitleText": "系统配置" } },
+    { "path": "pages/yxparts/index", "style": { "navigationBarTitleText": "燕秀产品处理" } },
+    { "path": "pages/yxparts/hptype", "style": { "navigationBarTitleText": "客户品名库" } },
+    { "path": "pages/store/select", "style": { "navigationBarTitleText": "选择经营店铺" } },
+    { "path": "pages/login/index", "style": { "navigationBarTitleText": "登录", "navigationStyle": "custom" } },
+    { "path": "pages/server/index", "style": { "navigationBarTitleText": "路径设置" } }
+  ],
+  "globalStyle": {
+    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "经营管理端",
+    "backgroundColor": "#f5f6f8",
+    "backgroundTextStyle": "dark"
+  },
+  "tabBar": {
+    "color": "#8995a5",
+    "selectedColor": "#1677ff",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "white",
+    "list": [
+      { "pagePath": "pages/home/index", "text": "首页", "iconPath": "static/tabbar/home.png", "selectedIconPath": "static/tabbar/home-on.png" },
+      { "pagePath": "pages/sales/list", "text": "销售", "iconPath": "static/tabbar/sales.png", "selectedIconPath": "static/tabbar/sales-on.png" },
+      { "pagePath": "pages/report/index", "text": "报表", "iconPath": "static/tabbar/report.png", "selectedIconPath": "static/tabbar/report-on.png" },
+      { "pagePath": "pages/purchase/index", "text": "采购", "iconPath": "static/tabbar/purchase.png", "selectedIconPath": "static/tabbar/purchase-on.png" },
+      { "pagePath": "pages/my/index", "text": "我的", "iconPath": "static/tabbar/mine.png", "selectedIconPath": "static/tabbar/mine-on.png" }
+    ]
+  },
+  "condition": {
+    "current": 0,
+    "list": [
+      { "name": "首页", "path": "pages/home/index" },
+      { "name": "销售单据", "path": "pages/sales/list" },
+      { "name": "报表", "path": "pages/report/index" },
+      { "name": "采购单据", "path": "pages/purchase/index" }
+    ]
+  }
+}

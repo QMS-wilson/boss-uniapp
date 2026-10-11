@@ -1,0 +1,80 @@
+{
+    "name" : "云进销存",
+    "appid" : "__UNI__D52D0B9",
+    "description" : "进销存移动经营管理端",
+    "versionName" : "1.1.1",
+    "versionCode" : "102",
+    "transformPx" : false,
+    "uniStatistics" : {
+        "enable" : false
+    },
+    "app-plus" : {
+        "usingComponents" : true,
+        "uniStatistics" : {
+            "enable" : false
+        },
+        "nvueStyle" : "uni-app-nvue",
+        "compilerVersion" : 3,
+        "splashscreen" : {
+            "alwaysShowBeforeRender" : true,
+            "waiting" : true,
+            "autoclose" : true,
+            "delay" : 0
+        },
+        "modules" : {
+            "Barcode" : {},
+            "Push" : {}
+        },
+        "distribute" : {
+            "android" : {
+                "packagename" : "com.v3jxc.app",
+                "permissions" : [
+                    "<uses-permission android:name=\"android.permission.INTERNET\"/>",
+                    "<uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\"/>"
+                ],
+                "abiFilters" : [ "armeabi-v7a", "arm64-v8a" ]
+            },
+            "icons" : {
+                "android" : {
+                    "ldpi" : "static/icon/android-ldpi.png",
+                    "mdpi" : "static/icon/android-mdpi.png",
+                    "hdpi" : "static/icon/android-hdpi.png",
+                    "xhdpi" : "static/icon/android-xhdpi.png",
+                    "xxhdpi" : "static/icon/android-xxhdpi.png",
+                    "xxxhdpi" : "static/icon/android-xxxhdpi.png"
+                }
+            },
+            "ios" : {
+                "dSYMs" : false
+            },
+            "sdkConfigs" : {}
+        }
+    },
+    "quickapp" : {},
+    "mp-weixin" : {
+        "appid" : "wx6199e73d2fa6bd59",
+        "uniStatistics" : {
+            "enable" : false
+        },
+        "setting" : {
+            "urlCheck" : false,
+            "es6" : true,
+            "postcss" : true,
+            "minified" : true
+        },
+        "usingComponents" : true,
+        "requiredBackgroundModes" : []
+    },
+    "h5" : {
+        "title" : "进销存",
+        "router" : {
+            "mode" : "hash",
+            "base" : "./"
+        },
+        "devServer" : {
+            "port" : 8080,
+            "https" : false
+        }
+    },
+    "vueVersion" : "3"
+}

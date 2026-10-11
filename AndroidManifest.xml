@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  自定义 Android 清单（**放项目根，不是 src/**，官方规定，HBuilderX 3.6+ 支持）。
+
+  为什么需要它：
+    uni-app 的 manifest.json 没有封装「文件类型关联」。要让 App 出现在微信/QQ
+    「用其他应用打开」的候选列表里，只能自己声明 intent-filter。
+
+  ★★ 别去写 manifest.json 里的 `app-plus.distribute.android.intentFilters`：
+     那个键在**社区帖子**里流传很广，但 DCloud 官方文档（Android原生应用清单文件和资源）
+     对 uni-app（非 x）项目给的唯一支持方式是**本文件**。
+     AndroidManifest.xml 会在云打包时与 SDK 的清单合并 ⇒ 相当于是给已存在的
+     activity 追加 intent-filter，不是重新声明一个 activity。
+
+  ★★ 挂哪个 activity 是这条路上**唯一**的坑，而且症状极具误导性（2026-10-07 真机实测踩到）：
+     APK 里 DCloud 的两个 activity 是这样的 ——
+        io.dcloud.PandoraEntry          exported = true    ← 启动壳（带 MAIN/LAUNCHER）
+        io.dcloud.PandoraEntryActivity  exported = false   ← 页面载体
+     第一版把 intent-filter 挂在 **PandoraEntryActivity** 上（因为官方文档写着
+     「所有页面 activity 为 io.dcloud.PandoraEntryActivity」），结果：
+        · 微信「用其他应用打开」的列表里**能看到我们的 App**（因为选择列表走
+          queryIntentActivities，它**不过滤 exported**）
+        · 但选中之后**什么都不发生**（真正启动一个 exported=false 的 activity
+          会被系统直接拒掉）
+     ⇒ 一句话：**列表里看得见 ≠ 点得动**。intent-filter 必须挂在 exported=true 的
+       `io.dcloud.PandoraEntry` 上，外部才起得来。
+     （判据不是"字符串在不在包里"，而是"挂在哪个 activity 上、那个 activity 的
+       exported 是什么" —— 见 scripts/dump-apk-manifest.py。）
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          xmlns:tools="http://schemas.android.com/tools"
+          package="com.v3jxc.app">
+
+    <application>
+        <activity android:name="io.dcloud.PandoraEntry">
+
+            <!-- ① 「用其他应用打开」：ACTION_VIEW，带文件 Uri -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <!-- .xls -->
+                <data android:mimeType="application/vnd.ms-excel" />
+                <!-- .xlsx -->
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+            </intent-filter>
+
+            <!-- ② 长按文件「分享 / 发送到」：ACTION_SEND，文件放在 EXTRA_STREAM。
+                 两个入口都声明，否则用户换个手势就找不到我们。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/vnd.ms-excel" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+            </intent-filter>
+
+        </activity>
+    </application>
+</manifest>

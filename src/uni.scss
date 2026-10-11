@@ -1,0 +1,146 @@
+/**
+ * uni-app 全局样式变量（设计令牌）
+ *
+ * 本套令牌基于「老板端」的视觉规范精修而来，保持同一产品调性：
+ *   - 主色为商务蓝 #1677ff，用于强调、链接、图表主线
+ *   - 灰阶承担全部版面结构，语义色只出现在状态与金额上
+ *   - 数字统一使用 tabular-nums，保证纵向对齐（金额列表可读性的关键）
+ *
+ * 间距规范：page 24rpx / card 36rpx / gap 20rpx / inner 16rpx
+ */
+
+/* ============ 主题色 ============ */
+$color-primary:        #1677ff;   // 主色 商务蓝（对齐老板端）
+$color-primary-dark:   #0d5fd6;   // 主色按下态
+$color-primary-bg:     #eaf3ff;   // 主色浅底
+$color-primary-border: #c8ddff;   // 主色描边
+$color-primary-light:  #72a8ff;   // 主色浅调（图表渐变尾）
+
+$color-success:        #27a866;   // 已审核 / 在线
+$color-success-bg:     #e8f7ef;
+$color-warning:        #e8952f;   // 待审核 / 待确认
+$color-warning-bg:     #fef4e6;
+$color-warning-text:   #8a5a15;   // 琥珀底上的深琥珀文字（警示说明）
+$color-danger:         #d95745;   // 应收 / 删除 / 支出
+$color-danger-bg:      #fdeeeb;
+$color-danger-soft-bg: #fbdcd6;   // 危险标签的软粉底（比 -bg 更强调）
+$color-violet:         #7057d9;   // 辅助（客户货品等）
+$color-violet-bg:      #f0edff;
+
+/* ============ 文字 / 背景（灰阶统一） ============ */
+$color-text:           #202b3b;   // 主文字
+$color-text-2:         #536175;   // 次文字
+$color-text-3:         #8995a5;   // 辅文字 / 说明
+$color-text-4:         #9aa5b3;   // 最弱文字 / 占位
+$color-bg:             #f5f6f8;   // 页面底色
+$color-bg-sunken:      #eef1f5;   // 搜索框等凹陷底
+$color-card:           #ffffff;   // 白卡
+$color-border:         #e1e6ed;   // 描边
+$color-divider:        #eef1f4;   // 分隔线
+$color-grid:           #edf0f3;   // 图表网格线
+
+/* ============ 圆角 ============ */
+$radius-card:          32rpx;     // 卡片 16px
+$radius-card-sm:       24rpx;     // 小卡片
+$radius-btn:           24rpx;     // 按钮
+$radius-input:         24rpx;     // 输入框
+$radius-pill:          999rpx;    // 胶囊（搜索框）
+$radius-tag:           10rpx;     // 标签
+$radius-icon:          22rpx;     // 图标底板
+
+/* ============ 间距 ============ */
+$space-page:           36rpx;     // 页面外边距 18px
+$space-card:           36rpx;     // 卡片内边距
+$space-gap:            22rpx;     // 卡片间距
+$space-inner:          16rpx;     // 卡内元素间距
+$space-tight:          12rpx;     // 紧邻元素
+
+/* ============ 字号 ============ */
+$fs-display:           48rpx;     // 页面主标题 24px
+$fs-h1:                46rpx;     // 登录大标题 29px → 收敛
+$fs-title:             40rpx;     // 卡片标题 20px
+$fs-metric:            46rpx;     // 指标金额 23px
+$fs-num-lg:            36rpx;     // 大号数字 18px（2026-10-09 收敛 36/34rpx 混用）
+$fs-subtitle:          30rpx;     // 小标题 15px
+$fs-body:              28rpx;     // 正文 14px
+$fs-caption:           26rpx;     // 说明 13px
+$fs-mini:              24rpx;     // 最小 12px
+$fs-micro:             24rpx;     // 12px（2026-10-09 从 11px 提上来：9.5px 已在可读线以下）
+
+$fw-bold:              600;
+$fw-heavy:             700;
+$fw-normal:            400;
+
+/* ============ 高度 ============ */
+$topbar-height:        116rpx;    // 顶栏 58px
+$searchbar-height:     112rpx;    // 搜索栏 56px
+$tabbar-height:        110rpx;    // 底栏
+$fab-size:             112rpx;    // 悬浮按钮 56px
+
+/* 底部固定操作条（.action-bar）—— 让位预留的唯一来源
+ * ★★ 这三个值必须一起维护：底栏高度变了而预留没跟着变，
+ *    内容会被底栏盖住，且**不会有任何报错**（2026-09-20 踩过）。
+ *    改完必须跑 scripts/check-bottom-clearance-live.js 复验。 */
+$actionbar-btn:        96rpx;     // 底栏按钮高 = .btn-primary / .btn-ghost
+$actionbar-pad:        16rpx;     // 底栏上下内边距 = $space-inner
+$actionbar-height:     128rpx;    // 底栏总高 = 96rpx + 16rpx × 2
+$actionbar-total:      48rpx;     // ★ 开单页底栏上面那一行「共 N 种 · 合计」占的高度
+                                  //  （只有 .has-action-bar--total 把它加进预留，别的页面不跟着变高）
+$actionbar-gap:        100rpx;    // 内容与底栏之间的呼吸余量
+                                  //  ★ 取 100rpx 使预留 = 228rpx(114px)，比改造前
+                                  //    详情页的 220rpx 还宽 —— 真机（地址栏收缩、
+                                  //    安全区、字号缩放）的余量比桌面实测更小，
+                                  //    这里刻意留宽一点。
+
+/* ============ 阴影（克制、分层） ============ */
+$shadow-card:          0 2rpx 2rpx rgba(21, 36, 59, 0.02);
+$shadow-raised:        0 8rpx 24rpx rgba(21, 36, 59, 0.08);
+$shadow-pop:           0 20rpx 48rpx rgba(21, 36, 59, 0.11);
+$shadow-primary:       0 16rpx 36rpx rgba(22, 119, 255, 0.20);
+
+/* ============ 数字字体栈（金额可读性核心） ============ */
+$font-num:             'Outfit', 'DIN Alternate', -apple-system, 'PingFang SC', sans-serif;
+
+/* ============ 动效（2026-10-08 立）============
+ * 这套值不是新造的，是把散在各页的 0.18 / 0.2 / 0.24 / 0.35 收编成一份共同语言：
+ * 之前观感"不统一"的根子在于每个动画各挑一个时长，而不是缺某条高级曲线。
+ *
+ * ★ 时长一律偏短。开单页一天要点几百次，**任何让操作变慢的动画都是负分**：
+ *   反馈类 80ms（快到只觉得"应了"，不会觉得"等一下才能走"），面板 240ms（要看清它从哪来）。
+ * ★ 曲线只有三条，且各管一件事：进场减速、退场加速、落定回弹。
+ *   $ease-spring 全站最多三处（勾选、成功态、草稿存入），到处回弹=没有重点。
+ */
+$dur-tap:              80ms;      // 按下/抬起：只改亮度与微缩放
+$dur-fast:             160ms;     // 淡入淡出、tab 选中态、颜色变化
+$dur-panel:            240ms;     // 半页面板升起、遮罩淡入
+$dur-slow:             320ms;     // 大面积内容替换（加载完 → 内容）
+$dur-number:           520ms;     // 金额滚动（与 AnimatedNumber 的 DUR 同源，改一处要改两处）
+/* 下面两个是**另一类**，不该硬塞进上面那组：
+   $dur-spin 是不定进度条的循环周期，它不是"从 A 到 B"，改快会显得焦虑、改慢显得卡死；
+   $dur-linger 是"重复录入那行的底色"——它要的是**停留一会儿再淡掉**，
+   比面板还慢是有意的（人得先看见那行变了，才轮到动画结束）。 */
+$dur-spin:             0.8s;
+$dur-linger:           350ms;
+
+$ease-out:             cubic-bezier(.22, .61, .36, 1);    // 进场：快进慢停
+$ease-in:              cubic-bezier(.55, .06, .68, .19);  // 退场：慢起快出
+$ease-spring:          cubic-bezier(.34, 1.4, .64, 1);    // 落定：轻微过冲，只给确认类动作用
+
+/* 按下反馈挂这个类（配 hover-class 用，见 App.vue 的 .hv-tap）。
+   ★ 只改 opacity / transform，**不许改 background** —— 改背景会和"选中态""危险态"
+     那套配色打架（档案页的 .chip--stop 就吃过这个亏：生效了但脸还是灰的）。 */
+$tap-press-opacity:    0.72;      // 按下去的亮度
+$tap-press-scale:      0.985;     // 按下去的缩放（卡片级用；行内小元素用不到）
+/* ★ hover-stay-time 默认 400ms（uni 的 hoverProps），松手后按下态还会挂 0.4 秒 ⇒ 手感发黏。
+     所有加 hover-class 的地方都要带上这个值。 */
+$tap-hover-stay:       80;
+
+/* ============ uni-app 内置变量覆盖 ============ */
+$uni-color-primary:    $color-primary;
+$uni-color-success:    $color-success;
+$uni-color-warning:    $color-warning;
+$uni-color-error:      $color-danger;
+$uni-text-color:       $color-text;
+$uni-bg-color:         $color-card;
+$uni-border-color:     $color-border;
+$uni-font-size-base:   $fs-body;
