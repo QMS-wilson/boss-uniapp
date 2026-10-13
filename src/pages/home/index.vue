@@ -73,11 +73,21 @@
         </text>
       </view>
 
-      <!-- 主操作 -->
-      <button class="btn-primary new-bill" @click="goNewBill">
-        <Icon name="plus" :size="20" color="white" />
-        <text>新建销售单</text>
-      </button>
+      <!-- 主操作两棵（实施方案 §5）：采购在左、销售在右（用户 10-12 要求互换）。
+           ★ 尺寸必须一致：全局 .btn-primary 是 96rpx + 粗体 + 阴影，
+             .btn-ghost 是 88rpx + 常规字重 —— 并排放就露出 4px 高差，
+             看着像"两个按钮大小不一样"（用户肉眼报的这条不是错觉，是量得出的）。
+             主次只靠底色与文字色分，不靠尺寸分。 -->
+      <view class="bill-actions">
+        <button class="btn-ghost bill-actions__btn" @click="goNewPurchase">
+          <Icon name="plus" :size="20" color="primary" />
+          <text>新建采购单</text>
+        </button>
+        <button class="btn-primary bill-actions__btn" @click="goNewBill">
+          <Icon name="plus" :size="20" color="white" />
+          <text>新建销售单</text>
+        </button>
+      </view>
 
       <!-- 快捷入口 -->
       <view class="entries">
@@ -102,6 +112,15 @@
           <view class="entry__meta">
             <text class="entry__title">供应商资料</text>
             <text class="entry__sub">查看与维护供应商信息</text>
+          </view>
+          <Icon name="chevron-right" :size="17" />
+        </view>
+        <!-- 库存查询（实施方案 §5：老板看库存的频率高于看供应商，以前只能从「我的」绕进去） -->
+        <view class="entry" @click="goInventory" hover-class="hv-on" :hover-stay-time="80">
+          <view class="entry__icon entry__icon--amber"><Icon name="warehouse" :size="19" color="warning" /></view>
+          <view class="entry__meta">
+            <text class="entry__title">库存查询</text>
+            <text class="entry__sub">看现存量与进出流水</text>
           </view>
           <Icon name="chevron-right" :size="17" />
         </view>
@@ -148,6 +167,7 @@ import { dashboardApi } from '../../api/index'
 import { salesApi } from '../../api/salesBill'
 import { fmtMoneyGroup } from '../../utils/format'
 import { expiringDrafts } from '../../utils/draftBox'
+import { setJumpFlag } from '../../utils/listJump'
 import Icon from '../../components/Icon.vue'
 import BillRow from '../../components/BillRow.vue'
 import LoadState from '../../components/LoadState.vue'
@@ -209,16 +229,31 @@ const todoList = computed(() => {
     list.push({ text: `应收账款 ¥${fmtMoneyGroup(dash.value.receivableTotal)} 未结清`, action: '去对账', to: 'reconcile' })
   }
   // ★ 草稿临期：读的是本机草稿桶，不依赖网络 —— 断网时这条照样提醒（不然到期才发现）。
-  const soon = expiringDrafts(3)
-  if (soon.length) {
-    const min = Math.min(...soon.map((d) => d.remainingDays))
+  // ★★ 必须**分 kind 各出一条**（2026-10-12 修）：早先两类合着数一条、点它只跳销售列表的
+  //   草稿格，于是「有 2 张采购草稿要过期」会把人带进销售草稿箱 —— 那里一条也没有，
+  //   提醒反而变成误导，而采购草稿本身没人再看第二眼。
+  const soonSales = expiringDrafts(3, 'sales')
+  if (soonSales.length) {
     list.push({
-      text: `${soon.length} 张草稿${min <= 0 ? '今天' : ' ' + min + ' 天内'}过期`,
-      action: '去草稿箱', to: 'drafts',
+      text: `${soonSales.length} 张销售草稿${expiringDaysText(soonSales)}过期`,
+      action: '去草稿箱', to: 'draftsSales',
+    })
+  }
+  const soonPurchase = expiringDrafts(3, 'purchase')
+  if (soonPurchase.length) {
+    list.push({
+      text: `${soonPurchase.length} 张采购草稿${expiringDaysText(soonPurchase)}过期`,
+      action: '去草稿箱', to: 'draftsPurchase',
     })
   }
   return list
 })
+
+/** 「今天」/「 3 天内」：两类草稿共用同一句说法，别一边写「天内」一边写「日内」 */
+function expiringDaysText(rows) {
+  const min = Math.min(...rows.map((d) => d.remainingDays))
+  return min <= 0 ? '今天' : ' ' + min + ' 天内'
+}
 
 async function load() {
   loading.value = true
@@ -252,18 +287,30 @@ function onTodo(t) {
   // 所以待审核与草稿两路一律经 storage 中转，由列表页 onShow 接住并切筛选。
   if (t.to === 'sales') goPending()
   else if (t.to === 'reconcile') uni.navigateTo({ url: '/pages/report/reconcile' })
-  else if (t.to === 'drafts') goDrafts()
+  else if (t.to === 'draftsSales') goDrafts()
+  else if (t.to === 'draftsPurchase') goPurchaseDrafts()
 }
 function goNewBill() { uni.navigateTo({ url: '/pages/sales/edit?mode=create' }) }
+function goNewPurchase() { uni.navigateTo({ url: '/pages/purchase/edit?mode=create' }) }
+function goInventory() { uni.navigateTo({ url: '/pages/inventory/index' }) }
 function goSalesList() { uni.switchTab({ url: '/pages/sales/list' }) }
 /** 草稿箱在销售列表的「草稿」格里；sales/list 是 tabBar 页，switchTab 带不了 query ⇒ storage 中转 */
 function goDrafts() {
-  uni.setStorageSync('sales_list_drafts', '1')
+  setJumpFlag('sales_list_drafts')
   uni.switchTab({ url: '/pages/sales/list' })
+}
+/**
+ * 采购的草稿箱在采购页自己的那一格里。
+ * ★ 那一页**也是 tabBar 页**（check-nav-links 当场抓到：navigateTo 打开 tabBar 页在 H5 会失败），
+ *   所以与销售同一套路：先落中转键，再 switchTab，由采购页 onShow 接住切格。
+ */
+function goPurchaseDrafts() {
+  setJumpFlag('purchase_list_drafts')
+  uni.switchTab({ url: '/pages/purchase/index' })
 }
 // ★ sales/list 是 tabBar 页，switchTab 不能带 query，改用 storage 中转
 function goPending() {
-  uni.setStorageSync('sales_list_pending', '1')
+  setJumpFlag('sales_list_pending')
   uni.switchTab({ url: '/pages/sales/list' })
 }
 function goDetail(id) { uni.navigateTo({ url: '/pages/sales/detail?id=' + id }) }
@@ -363,7 +410,16 @@ onPullDownRefresh(async () => { await load(); uni.stopPullDownRefresh() })
 .receivable__note { font-size: $fs-mini; color: rgba(255,255,255,0.78); margin-top: 8rpx; }
 
 /* ============ 主按钮 ============ */
-.new-bill { margin-top: $space-gap; width: 100%; }
+/* 主操作两棵一排：等分而不是"主宽次窄"（文案都是五个字，窄的那棵会把字挤成两行）。
+   ★ 高度与字重在这里**强制对齐**（96rpx / $fw-bold）：两棵用的全局类本身差 8rpx，
+     并排就看得出来大小不一致；主次交给底色/文字色去分。 */
+.bill-actions { display: flex; gap: $space-inner; margin-top: $space-gap; }
+/* ★ 两棵都得有 1rpx 描边，宽度才会真相等：flex 分配算的是内容宽，
+   而 `.btn-ghost` 那圈边是**加在内容宽之外**的（实测 183.72 vs 181.73，差 2px）。
+   给主按钮补一圈同色描边 —— 底色不变、看不出来，但两棵外框就一样宽了。
+   （同样的 2px 在别的页面"主+次按钮并排"处也在，属全站视觉批要收的账。） */
+.bill-actions__btn { flex: 1; min-width: 0; height: 96rpx; font-weight: $fw-bold; box-sizing: border-box; }
+.bill-actions .btn-primary { border: 1rpx solid $color-primary; }
 
 /* ============ 入口 ============ */
 .entries { display: flex; flex-direction: column; gap: $space-inner; margin-top: $space-gap; }
@@ -379,6 +435,7 @@ onPullDownRefresh(async () => { await load(); uni.stopPullDownRefresh() })
 .entry__icon--blue { background: $color-primary-bg; color: $color-primary; }
 .entry__icon--violet { background: $color-violet-bg; color: $color-violet; }
 .entry__icon--green { background: $color-success-bg; color: $color-success; }
+.entry__icon--amber { background: $color-warning-bg; color: $color-warning; }
 .entry__meta { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .entry__title { font-size: $fs-subtitle; font-weight: $fw-bold; }
 .entry__sub { font-size: $fs-mini; color: $color-text-3; margin-top: 4rpx; }

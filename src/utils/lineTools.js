@@ -6,6 +6,7 @@
  *   文案、按钮字数、活值口径必须一模一样，否则用户在两个页面学到两套规则。
  */
 import { fmtMoney } from './format'
+import { mulMoney } from './money'
 
 /**
  * 删掉明细里的第 i 行。**先问一句再删**：
@@ -22,7 +23,8 @@ export function confirmRemoveLine(form, i) {
   const it = (form.items || [])[i]
   if (!it) return
   const qty = Number(it.qty) || 0
-  const amt = Math.round(qty * (Number(it.price) || 0) * 100) / 100
+  // ★ 这一行的钱走 money.js（与开单页合计同一口径），不许再用 Math.round 半进位
+  const amt = mulMoney(qty, Number(it.price) || 0)
   const what = it.name || it.productId || '这一行'
   uni.showModal({
     title: '删掉这一行？',

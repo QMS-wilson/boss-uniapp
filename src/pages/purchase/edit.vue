@@ -755,7 +755,8 @@ async function load() {
         ? [{ unit: it.unit, rate: Number(it.unitRate ?? it.rate), basic: false }] : [],
       qty: it.qty,
       price: it.price,
-      amount: it.amount != null ? it.amount : Number(it.qty || 0) * Number(it.price || 0),
+      // ★ 后端没给金额才现算：走 mulMoney，与合计、与库里同一套取整（半偶）
+      amount: it.amount != null ? it.amount : mulMoney(Number(it.qty || 0), Number(it.price || 0)),
       // ★ 明细备注：适配层已统一读 `remark ?? note`（第十轮）
       remark: it.remark ?? it.note ?? '',
       priceSource: '',
@@ -932,6 +933,9 @@ async function onSave() {
         done = true
         submitToken.value = mkSubmitToken()
         if (editId.value) useCacheStore().remove('purchase:' + editId.value)
+        // ★ 改单同样是"写过"：不打这个标记，退回采购列表那一趟不会刷，
+        //   列表上还是改之前的金额与状态（销售页两个分支共用一处打点，采购先前只在建单那支打了）。
+        markBillWritten('purchase')
         toast('提交成功', 'success')
         goBack()
       } else {
@@ -1194,7 +1198,8 @@ onShow(() => {
 .it-name-line--open { align-items: flex-start; }
 .it-name-line--open .it-name { flex: 1; max-width: none; white-space: normal; line-height: 1.45; }
 .it-name-line--open :deep(.icon-svg) { margin-top: 8rpx; }
-.it-del { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; color: $color-danger; padding: 0 8rpx; }
+/* ★ 删行热区撑到 88rpx（与销售页同一口径，U6）：图标仍是 20，只是手指好点些 */
+.it-del { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; color: $color-danger; min-height: 88rpx; padding: 0 12rpx; }
 /* 规格那一行：**只在展开态存在**（收起态规格挤在品名同行）。
    上下边距与改造前一致（10/18rpx）—— 明细卡片的行距是被断言量着的，多一像素都会被判成布局回归。 */
 .it-spec-row {

@@ -154,8 +154,8 @@ function goGoods() {
 }
 function goSalesList() {
   // ★ sales/list 是 tabBar 页，switchTab 不能带 query —— 用 storage 中转
-  //   （与首页「待审核 N 笔」的 sales_list_pending 同一套路）。
-  uni.setStorageSync('sales_list_customer', { code: code.value, name: cust.value?.name || '' })
+  //   （与首页「待审核 N 笔」的 sales_list_pending 同一套路，键都带商户码与账套后缀）。
+  setJumpFlag('sales_list_customer', { code: code.value, name: cust.value?.name || '' })
   uni.switchTab({ url: '/pages/sales/list' })
 }
 function goBill(id) { uni.navigateTo({ url: '/pages/sales/detail?id=' + id }) }

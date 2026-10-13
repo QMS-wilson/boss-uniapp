@@ -105,8 +105,9 @@ import { ref, computed, onMounted } from 'vue'
 import { onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
 import { purchaseApi } from '../../api/index'
 import { config } from '../../utils/config'
-import { listDrafts, removeDraft, upgradeOfflineDraft, extendDraft, draftStampText } from '../../utils/draftBox'
+import { listDrafts, removeDraft, upgradeOfflineDraft, extendDraft, draftStampText, draftNote } from '../../utils/draftBox'
 import { takeBillWritten } from '../../utils/billWrites'
+import { takeJumpFlag } from '../../utils/listJump'
 import { calcTotal } from '../../utils/billState'
 import Icon from '../../components/Icon.vue'
 import BillRow from '../../components/BillRow.vue'
@@ -269,7 +270,7 @@ function toRow(d) {
     totalAmount: t.totalAmount,
     note: (d.form && d.form.memo) || (d.payload || {}).note || '',
     billDate: when,
-    draftNote: d.remainingDays <= 10 ? '剩 ' + Math.max(d.remainingDays, 0) + ' 天' : '',
+    draftNote: draftNote(d),
     remain: d.remainingDays,
     // ★ 与销售列表同一口径（2026-10-02 改了拍板）：手动草稿行给「留下 / 删除」。
     actions: d.origin === 'manual'
@@ -426,6 +427,12 @@ let entered = false
 onShow(() => {
   refreshDrafts()
   const dirty = takeBillWritten('purchase')
+  // ★ 首页那条「N 张采购草稿将过期」经 storage 中转跳进来 ⇒ 直接落在草稿那一格。
+  //   放在 `entered` 判定**之前**：本页第一次被 switchTab 打开时 entered 还是 false，
+  //   排在后面就等于"人带着意图来了、这一格却没切"。
+  if (takeJumpFlag('purchase_list_drafts')) {
+    if (status.value !== 'draft') switchTab('draft')
+  }
   if (!entered) { entered = true; return }
   if (!isDraftTab.value && dirty) reload()
 })

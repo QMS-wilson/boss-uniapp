@@ -14,7 +14,7 @@
             <view class="head__top-left">
               <StatusTag :status="bill.status" :pulse="pulseN" />
               <!-- ★ 作废按钮（需求：放在单据状态旁；★ 只有未审核单才能作废，已审核要先反审） -->
-              <text v-if="bill.status === 'unapproved'" class="void-btn" :class="{ 'is-busy': busy }" @click="onVoid">作废</text>
+              <text v-if="bill.status === 'unapproved'" class="void-btn" :class="{ 'is-busy': busy, 'void-btn--off': voidDisabled }" @click="onVoid">作废</text>
             </view>
             <text class="head__no">{{ bill.billNo }}</text>
           </view>
@@ -98,16 +98,20 @@
         <Icon name="printer" :size="18" color="text-2" />
         <text>打印</text>
       </button>
-      <!-- 修改：仅未审核显示（已审核/作废不显示） -->
+      <!-- 修改：仅未审核显示（已审核/作废不显示）；这台机器确认过没有改单动作 ⇒ 禁用样子 + 说明 -->
       <button v-if="bill.status === 'unapproved'" class="btn-ghost action-bar__btn"
-              :disabled="!bill.editable" @click="goEdit">
-        <text>{{ bill.editable ? '修改' : '不可修改' }}</text>
+              :class="{ 'is-disabled': editDisabled }" :disabled="editDisabled" @click="goEdit">
+        <text>{{ editLabel }}</text>
       </button>
       <!-- 审核（未审核）/ 反审（已审核）；作废单两者都不显示 -->
-      <button v-if="bill.status === 'unapproved'" class="btn-primary action-bar__btn" :class="{ 'is-busy': busy }" @click="onAudit">
+      <button v-if="bill.status === 'unapproved'" class="action-bar__btn"
+              :class="[auditDisabled ? 'btn-ghost is-disabled' : 'btn-primary', { 'is-busy': busy }]"
+              @click="onAudit">
         <text>{{ busy ? '处理中…' : '审核' }}</text>
       </button>
-      <button v-else-if="bill.status === 'approved'" class="btn-primary action-bar__btn" :class="{ 'is-busy': busy }" @click="onUnaudit">
+      <button v-else-if="bill.status === 'approved'" class="action-bar__btn"
+              :class="[unauditDisabled ? 'btn-ghost is-disabled' : 'btn-primary', { 'is-busy': busy }]"
+              @click="onUnaudit">
         <text>{{ busy ? '处理中…' : '反审' }}</text>
       </button>
     </view>
@@ -121,6 +125,7 @@ import { salesApi } from '../../api/salesBill'
 import { fmtMoney, fmtMoneyGroup } from '../../utils/format'
 import { checkEditable, editableReasonText } from '../../utils/billState'
 import { markBillWritten } from '../../utils/billWrites'
+import { hasOp, opList, loadAccountOptions } from '../../store/options'
 import StatusTag from '../../components/StatusTag.vue'
 import StopTag from '../../components/StopTag.vue'
 import LoadState from '../../components/LoadState.vue'
@@ -174,8 +179,10 @@ async function load() {
   else error.value = res.message
 }
 
-function goEdit() {
+async function goEdit() {
   if (!bill.value?.editable) return
+  // ★ 判据保持原样（editable 不是真值就不给进），只多一道能力确认
+  if (!(await ensureOp('salesbill.update', '改这张单'))) return
   uni.navigateTo({ url: '/pages/sales/edit?mode=edit&id=' + id.value })
 }
 function goPrint() { uni.navigateTo({ url: '/pages/print/index?billId=' + id.value }) }
@@ -185,8 +192,9 @@ function goPrint() { uni.navigateTo({ url: '/pages/print/index?billId=' + id.val
 const busy = ref(false)
 
 /* 审核（未审核 → 已审核）：只改 IsAuditing/AuditingTime，不动金额库存明细 */
-function onAudit() {
+async function onAudit() {
   if (busy.value) return
+  if (!(await ensureOp('salesbill.audit', '审核'))) return
   uni.showModal({
     title: '审核',
     content: '审核后该单据将不可修改，确认审核？',
@@ -203,8 +211,9 @@ function onAudit() {
 }
 
 /* 反审（已审核 → 未审核）；★ 作废单后端会拒绝（只能复制） */
-function onUnaudit() {
+async function onUnaudit() {
   if (busy.value) return
+  if (!(await ensureOp('salesbill.unaudit', '反审'))) return
   uni.showModal({
     title: '反审',
     content: '反审后该单据将恢复为未审核，确认反审？',
@@ -221,8 +230,9 @@ function onUnaudit() {
 }
 
 /* 作废（未作废 → 已作废）；★ 作废是终态，弹窗明确告知「无法反审恢复」 */
-function onVoid() {
+async function onVoid() {
   if (busy.value) return
+  if (!(await ensureOp('salesbill.void', '作废这张单'))) return
   uni.showModal({
     title: '作废单据',
     content: '作废后该单据不可恢复（仅可复制新建），确定要作废吗？',
@@ -244,12 +254,72 @@ function goCopy() {
   uni.navigateTo({ url: '/pages/sales/edit?mode=copy&from=' + encodeURIComponent(id.value) })
 }
 
+/**
+ * ★★ 动作能力门（2026-10-12，与采购详情同一套路）：
+ *   审核 / 反审 / 作废 三个按钮原先只看单据状态，不看**这台机器的服务发没发这个 op**。
+ *   客户机上的 exe 是一家一家换的，旧包没有 salesbill.audit 时，按钮画着、点了才知道不行 ——
+ *   等于把一次网络往返变成一次"白点一下"。判据一律问 Agent 报回来的动作清单。
+ *   ★ 必须经由 ref：`hasOp` 读的是模块级变量、不是响应式的，直接写进 computed
+ *     只在首帧算一次，capabilities 后到也救不回来。
+ */
+const opsKnown = ref(false)
+const opCan = ref({ audit: false, unaudit: false, void: false, update: false })
+function syncOp() {
+  opsKnown.value = opList().length > 0
+  opCan.value = {
+    audit: hasOp('salesbill.audit'),
+    unaudit: hasOp('salesbill.unaudit'),
+    void: hasOp('salesbill.void'),
+    update: hasOp('salesbill.update'),
+  }
+}
+/**
+ * 点动作按钮时先过这道门：清单还没来过就当场问一次，
+ * 确认过没有才说"这台机器的服务不支持"，说不清是连不上还是真没这个能力就是误导。
+ * @returns {Promise<boolean>} true = 可以继续做这件事
+ */
+async function ensureOp(op, label) {
+  if (!opsKnown.value) {
+    uni.showLoading({ title: '确认中', mask: true })
+    await loadAccountOptions(true)
+    uni.hideLoading()
+    syncOp()
+  }
+  if (hasOp(op)) return true
+  uni.showToast({
+    title: opsKnown.value
+      ? `这台机器的本地服务还不能${label}，请先更新到最新版`
+      : `连不上本地服务，确认不了这台机器能不能${label}`,
+    icon: 'none', duration: 3000,
+  })
+  return false
+}
+
+/**
+ * 按钮"亮不亮"的判据：这台机器确认过、又确实没这个动作 ⇒ 摆出禁用样子。
+ * opsKnown=false（还没问过 / 连不上）时**照旧亮着** —— 那是"还不知道"，
+ * 不能把它画成"这台机器不支持"，否则点了本地服务又恢复的人会被假象劝退。
+ */
+const auditDisabled = computed(() => opsKnown.value && !opCan.value.audit)
+const unauditDisabled = computed(() => opsKnown.value && !opCan.value.unaudit)
+const voidDisabled = computed(() => opsKnown.value && !opCan.value.void)
+const editDisabled = computed(() => (bill.value && bill.value.editable === false)
+  || (opsKnown.value && !opCan.value.update))
+const editLabel = computed(() => {
+  if (bill.value && bill.value.editable === false) return '不可修改'
+  if (opsKnown.value && !opCan.value.update) return '这台机器不支持改单'
+  return '修改'
+})
+
 onLoad((q) => { id.value = q.id || ''; load() })
+// ★ 动作清单要在**画按钮之前**尽量到位（拉过一次就全应用共享，不额外加请求）
+loadAccountOptions().then(syncOp)
 // ★★ 「修改销售单」保存后返回本页，必须重新拉取 —— 否则页面还挂着改之前的单头
 //   与明细（用户反馈的原话：「保存修改返回销售单详情时应自动刷新，否则还是会
 //   显示原数据」）。首次进入由 onLoad 负责，这里跳过，避免重复请求。
 let entered = false
 onShow(() => {
+  syncOp()
   if (!entered) { entered = true; return }
   if (id.value) load()
 })
@@ -279,6 +349,8 @@ onShow(() => {
   padding: 4rpx 16rpx; border: 1rpx solid $color-danger; border-radius: $radius-btn;
   line-height: 1.4;
 }
+/* 这台机器的服务确认过没有作废动作 ⇒ 压暗示意，点了仍会说明原因（见 ensureOp） */
+.void-btn--off { opacity: 0.45; }
 /* 写操作在飞：按钮压暗示意"正在处理"，真正的重入由 busy 守卫挡住 */
 .is-busy { opacity: 0.6; }
 .head__no {

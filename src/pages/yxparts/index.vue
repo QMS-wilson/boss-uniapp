@@ -263,7 +263,12 @@
         <view class="section-head">
           <text class="section-head__title">选择货品：{{ pickRow.customerName }}</text>
         </view>
-        <text class="intro">候选按相似度排序，与电脑端双击弹窗同一套算法。</text>
+        <view class="search">
+          <input v-model="candKw" class="search__in" placeholder="搜编号 / 品名 / 规格 / 拼音码"
+                 confirm-type="search" @confirm="searchItems" @input="onCandKwInput" />
+          <view class="search__btn" @click="searchItems" hover-class="hv-on" :hover-stay-time="80"><text>搜索</text></view>
+        </view>
+        <text class="intro">{{ candIntro }}</text>
         <view v-if="candLoading" class="msg msg--info"><text>正在取候选…</text></view>
         <view v-else-if="candErr" class="msg msg--err"><text>{{ candErr }}</text></view>
         <scroll-view v-else class="cand-list" scroll-y>
@@ -272,9 +277,14 @@
             <text class="cand__t">{{ c.hpmcKh }}{{ c.specA ? ('　' + c.specA) : '' }}</text>
             <text class="cand__s">hpbh {{ c.hpbh }} ｜ 单位 {{ c.unit }} ｜ 相似度 {{ Math.round(c.score * 100) }}%</text>
             <text class="cand__s">系统品名：{{ c.hpmc || '—' }}{{ c.specB ? (' ｜ 实际尺寸 ' + c.specB) : '' }}</text>
+            <!-- 拼音码要显示出来：人打的是这几个字母，看得见才对得上"我刚搜到了什么" -->
+            <text v-if="c.py" class="cand__s">拼音码：{{ c.py }}</text>
           </view>
           <view v-if="!candidates.length" class="msg msg--warn">
-            <text>没有候选。可以先用电脑端把这条客户写法补进品名库。</text>
+            <text>{{ candEmptyText }}</text>
+          </view>
+          <view v-else-if="candCapped" class="msg msg--info">
+            <text>只列了前 50 条，把关键词写得更具体一些。</text>
           </view>
         </scroll-view>
         <view class="sheet__btns">
@@ -352,6 +362,11 @@ const candidates = ref([])
 const chosen = ref(null)
 const candLoading = ref(false)
 const candErr = ref('')
+// 搜索栏：mode='cand' 是按相似度给的候选；mode='search' 是在整库里按关键词搜
+const candKw = ref('')
+const candMode = ref('cand')
+const candCapped = ref(false)
+let candTimer = null
 
 /* ---------------- 建单（P3）：勾选 → 选客户 → salesbill.create ---------------- */
 /** { [lineNo]: true } —— 匹配成功的行默认勾上，未匹配行永远不勾（方案 6.6） */
@@ -621,29 +636,78 @@ function onRowTap(row) {
 
 async function openCandidates(row) {
   pickRow.value = row
+  candKw.value = ''
+  candMode.value = 'cand'
+  candCapped.value = false
+  await fetchCandidates()
+}
+
+let candSeq = 0
+/** 拉一次列表：`candKw` 空 = 按相似度给候选；非空 = 在整库里按关键词搜（含搜不到的那些货品） */
+async function fetchCandidates() {
+  const row = pickRow.value
+  if (!row) return
+  const kw = String(candKw.value || '').trim()
+  const searching = !!kw
+  const seq = ++candSeq
   candidates.value = []
   chosen.value = null
   candErr.value = ''
   candLoading.value = true
   try {
-    const res = await yxApi.suggest(row)
+    const res = await yxApi.suggest(row, kw, searching)
+    if (seq !== candSeq) return          // 慢的那次回来不能盖掉新的那次（连续打字必发生）
     if (res && res.ok) {
-      candidates.value = (res.data && res.data.items) || []
+      const d = res.data || {}
+      candidates.value = d.items || []
+      candMode.value = d.search ? 'search' : 'cand'
+      candCapped.value = !!d.capped
     } else {
       candErr.value = String(((res && res.error) || {}).message || '取候选失败')
     }
   } catch (e) {
+    if (seq !== candSeq) return
     candErr.value = String((e && e.message) || e)
   } finally {
-    candLoading.value = false
+    if (seq === candSeq) candLoading.value = false
   }
 }
 
+/** 打字停 350ms 再查：每敲一个字就打一次库，手机上会一直转圈。 */
+function onCandKwInput() {
+  if (candTimer) clearTimeout(candTimer)
+  candTimer = setTimeout(fetchCandidates, 350)
+}
+
+function searchItems() {
+  if (candTimer) clearTimeout(candTimer)
+  fetchCandidates()
+}
+
+const candIntro = computed(() => {
+  if (candMode.value === 'search') {
+    return `在全部货品里按“${String(candKw.value || '').trim()}”搜，命中 ${candidates.value.length} 条`
+  }
+  return '候选按相似度排序，与电脑端双击弹窗同一套算法。要选列表外的货品，就在上面搜。'
+})
+
+const candEmptyText = computed(() => {
+  if (candMode.value === 'search') {
+    return '没搜到匹配的货品。编号、客户品名、系统品名、规格、拼音码都可以试；关键词越短命中越多。'
+  }
+  return '没有达标的候选。可以在上面直接搜货品编号或品名，或先用电脑端把这条客户写法补进品名库。'
+})
+
 function closeCandidates() {
+  if (candTimer) clearTimeout(candTimer)
+  candSeq++                    // 让在飞的响应作废，别关掉了还往状态里写
   pickRow.value = null
   candidates.value = []
   chosen.value = null
   candErr.value = ''
+  candKw.value = ''
+  candMode.value = 'cand'
+  candCapped.value = false
 }
 
 /** remember=true → 写记忆库（下次自动命中）；false → 只改这一行。 */

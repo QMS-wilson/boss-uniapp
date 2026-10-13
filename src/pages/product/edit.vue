@@ -89,7 +89,7 @@
             <switch :checked="!!u.stopped" color="#1677ff" :disabled="u.basic || unitsOver"
                     @change="u.stopped = $event.detail.value" />
           </view>
-          <view v-if="!u.basic && u._new" class="unit__del" @click="removeUnit(i)" hover-class="hv-on" :hover-stay-time="80">
+          <view v-if="!u.basic && u._new" class="unit__del unit__del--act" @click="removeUnit(i)" hover-class="hv-on" :hover-stay-time="80">
             <text>删除本档（还没开过单，可以直接删）</text>
           </view>
           <view v-else-if="!u.basic" class="unit__del unit__del--tip">
@@ -282,6 +282,7 @@ import { accountOptions, loadAccountOptions } from '../../store/options'
 import { fromProductForm, toProduct, toProductUnit } from '../../utils/adapt'
 import { fmtQty, toast } from '../../utils/format'
 import { markBillWritten } from '../../utils/billWrites'
+import { useBillExitGuard } from '../../utils/billExitGuard'
 import Icon from '../../components/Icon.vue'
 import StopTag from '../../components/StopTag.vue'
 
@@ -314,6 +315,35 @@ const blank = () => ({
   batch: false, serial: false, stopped: false, stock: 0,
 })
 const form = reactive(blank())
+
+/**
+ * ★★ 中途退出挽留（2026-10-12 补，与客户/供应商两页同一套）：
+ *   这页是全站字段最多的一张表（基本信息 + 多单位子表），原先「取消」与返回键都是裸
+ *   `navigateBack` —— 填了七八档价格点错一下就全没了，也不问一句。
+ *   货品档案**没有草稿箱** ⇒ canDraft 恒 false，只问「放弃修改 / 继续改」，不静默留一份。
+ *   判脏沿用本页既有的那套 diff：SKIP_KEYS 里的回显字段（库存/状态/最近售价…）不参与，
+ *   单位子表按 unitSig 比 —— 与 payload() 少发一列的思路一致，两套判据迟早分家。
+ */
+const ready = ref(false)
+const guard = useBillExitGuard({
+  ready: () => ready.value,
+  editable: () => !detailFailed.value,
+  hasContent: () => !!(String(form.name || '').trim()
+    || String(form.remark || '').trim() || String(form.spec || '').trim()
+    || (form.units || []).some((u) => String(u.unit || '').trim()
+      || String(u.barcode || '').trim()
+      || (u.salePrice !== '' && u.salePrice != null)
+      || (u.purchasePrice !== '' && u.purchasePrice != null))),
+  canDraft: () => false,
+  sig: () => {
+    const t = {}
+    Object.keys(form).forEach((k) => { if (SKIP_KEYS.indexOf(k) < 0) t[k] = form[k] })
+    t.__units = (form.units || []).map(unitSig).join('|')
+    return t
+  },
+  askText: () => ({ discardContent: '离开后这些填写内容不会保存，确认放弃？' }),
+  saving: () => saving.value,
+})
 
 // 只读/回显字段：它们不是 product.save 的入参，也不参与"改没改"的比较
 const SKIP_KEYS = ['id', 'hpbh', 'units', 'stock', 'stockMin', 'stockMax', 'status', 'prices',
@@ -617,7 +647,11 @@ async function load() {
       form.units = [{ unit: '个', rate: 1, basic: true, stopped: false, barcode: '', salePrice: '', purchasePrice: '' }]
       form.baseUnit = '个'
     }
-    refreshCode()      // 新增页一打开就先取规则（有没有类别都能取到，见 nextCode）
+    await refreshCode()      // 新增页一打开就先取规则（有没有类别都能取到，见 nextCode）
+    // ★ 新增态：默认那一档单位是页面自己种的，自动带出的编号也是 —— 都不算"人填的内容"，
+    //   所以要等取号**回来之后**再立基线，否则一进页面就是"改过了"，返回被白拦一道。
+    ready.value = true
+    guard.markClean()
     return
   }
   detailLoading.value = true
@@ -648,6 +682,9 @@ async function load() {
   supText.value = p.supplier || ''
   const hit = suppliers.value.find((s) => s.code === p.supplier)
   if (hit) supText.value = hit.name
+  // ★ 整表水合完才立基线：否则"改没改"会拿库存/最近售价这些回显字段来判
+  ready.value = true
+  guard.markClean()
 }
 
 async function onSave() {
@@ -661,6 +698,8 @@ async function onSave() {
     : await productApi.update(editId.value, body)
   saving.value = false
   if (res.ok) {
+    // ★ 已落库 ⇒ 闸门先让开，否则那 400ms 后的返回会被自己拦一道「放弃修改？」
+    guard.allowLeave()
     markBillWritten('product')   // 列表页据此决定要不要刷（看一眼不该刷回第 1 页）
     // ★ 自动带出的号在保存响应里回来 —— 提示写的是**真正存进去的那个号**，
     //   不是界面当初显示的那一个（中间可能已被占用/规则刚被人改过）。
@@ -670,7 +709,8 @@ async function onSave() {
   }
   else toast(res.message || '保存失败')
 }
-function goBack() { uni.navigateBack() }
+/** 页内「取消」与返回键走同一个判定（只拦返回键等于留一个能绕过挽留的洞） */
+function goBack() { if (guard.tryBack()) return; uni.navigateBack() }
 
 onLoad((q) => {
   editId.value = q.id || q.code || q.hpbh || ''
@@ -718,6 +758,9 @@ onLoad((q) => {
 .urow__line { display: flex; align-items: center; justify-content: space-between; gap: $space-inner; }
 .urow__hint { flex: 1; min-width: 0; font-size: $fs-mini; color: $color-text-2; line-height: 1.45; }
 .unit__del { padding: 14rpx 0 0; font-size: $fs-mini; color: $color-danger; }
+/* ★ 只有"真能点的那一条"撑到 88rpx 热区（U6）；旁边那句"已保存的仅可停用"是说明文字，
+   跟着变高只会把单位区拉松，所以判据写在 --act 上而不是 .unit__del 上。 */
+.unit__del--act { min-height: 88rpx; display: flex; align-items: center; }
 .unit__del--tip { color: $color-text-3; font-size: $fs-micro; }
 .unit-add { display: flex; align-items: center; justify-content: center; gap: $space-tight;
   padding: $space-inner; border: 1rpx dashed $color-primary-border; border-radius: $radius-card-sm;

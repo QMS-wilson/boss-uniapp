@@ -13,7 +13,7 @@
  * ★ 手动草稿提交走的是现有 `client_token` 幂等（submitToken 随草稿一起存），
  *   所以"提交后响应丢了再点一次"不会重复建单。
  */
-import { useCacheStore } from '../store/cache'
+import { useCacheStore, missedAutoWindow } from '../store/cache'
 import { merchantCode, selectedDatabase } from './merchant'
 import { toast } from './format'
 
@@ -215,6 +215,20 @@ export function listDrafts(kind) {
 /** 角标用的计数：不传 kind 就是全部 */
 export function countDrafts(kind) {
   return listDrafts(kind).length
+}
+
+/**
+ * 草稿行上那一句「它为什么还在这儿」。
+ * ★ 2026-10-13：「超过自动重放窗口」原来只靠 App 回前台弹 toast —— 那是这条草稿的
+ *   **长期属性**，不是一次上传出的事，于是每杀一次进程就又弹一遍同样的话。
+ *   改成写在行上：一次说清、不催，动作（上传/删除）本来就在同一行。
+ */
+export function draftNote(d) {
+  const parts = []
+  if (missedAutoWindow(d)) parts.push('已过自动上传时间，需手动点上传')
+  const days = Number(d && d.remainingDays)
+  if (Number.isFinite(days) && days <= 10) parts.push('剩 ' + Math.max(days, 0) + ' 天')
+  return parts.join(' · ')
 }
 
 /** 首页待办：N 张草稿将在 X 天内过期（过期本身会被 prune 掉，所以只看 0~days） */

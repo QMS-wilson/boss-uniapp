@@ -110,8 +110,9 @@ import { ref, computed, onMounted } from 'vue'
 import { onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
 import { salesApi } from '../../api/salesBill'
 import { config } from '../../utils/config'
-import { listDrafts, removeDraft, upgradeOfflineDraft, extendDraft, draftStampText } from '../../utils/draftBox'
+import { listDrafts, removeDraft, upgradeOfflineDraft, extendDraft, draftStampText, draftNote } from '../../utils/draftBox'
 import { takeBillWritten } from '../../utils/billWrites'
+import { takeJumpFlag } from '../../utils/listJump'
 import { calcTotal } from '../../utils/billState'
 import Icon from '../../components/Icon.vue'
 import BillRow from '../../components/BillRow.vue'
@@ -248,7 +249,7 @@ function toRow(d) {
     //   免得将来有人把 items 从行对象里摘掉时「N 种」悄无声息消失。
     lineCount: items.length,
     // 剩 N 天只在真的快到期时才占地方（>10 天不显示）
-    draftNote: d.remainingDays <= 10 ? '剩 ' + Math.max(d.remainingDays, 0) + ' 天' : '',
+    draftNote: draftNote(d),
     remain: d.remainingDays,
     // ★ 2026-10-02 改了口径（用户点头）：手动草稿行上给「留下 / 删除」。
     //   以前是"进编辑页里再删"，但清一批草稿要 点开→删除→返回 三步，没人真去清；
@@ -439,20 +440,16 @@ onShow(() => {
   if (!entered) { entered = true }
   else if (!isDraftTab.value && dirty) reload()
   // ★ 首页「待审核 N 笔」跳转：通过 storage 中转，进页自动切「未审核」tab
-  const flag = uni.getStorageSync('sales_list_pending')
-  if (flag) {
-    uni.removeStorageSync('sales_list_pending')
+  if (takeJumpFlag('sales_list_pending')) {
     if (status.value !== 'unapproved') switchTab('unapproved')
   }
   // ★ 首页「N 张草稿将过期」跳转：同样经 storage 中转，进页自动切「草稿」tab
-  if (uni.getStorageSync('sales_list_drafts')) {
-    uni.removeStorageSync('sales_list_drafts')
+  if (takeJumpFlag('sales_list_drafts')) {
     if (status.value !== 'draft') switchTab('draft')
   }
   // ★ 客户档案「查看全部」跳转：带入该客户的筛选（读一次即清，返回本页不重复触发）
-  const pick = uni.getStorageSync('sales_list_customer')
+  const pick = takeJumpFlag('sales_list_customer')
   if (pick && pick.code) {
-    uni.removeStorageSync('sales_list_customer')
     if (customerFilter.value?.code !== pick.code) {
       customerFilter.value = pick
       reload()

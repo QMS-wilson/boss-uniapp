@@ -87,6 +87,14 @@ export const useAuthStore = defineStore('auth', {
       const cur = s.stores.find((x) => x.name === s.currentStoreName)
       return cur ? cur.online !== false : false
     },
+    /**
+     * 能不能进「成员管理」（看/踢在线会话）。
+     *
+     * ★ 权限位由云端登录响应带回来；云端接口**还会再校验一次** ——
+     *   所以这里只决定"显不显示入口"，不作为安全边界（改前端也无法越权）。
+     * ★ 用 indexOf 不用 includes：小程序基础库对 includes 的支持更晚，indexOf 最省心。
+     */
+    canManageSessions: (s) => (s.permissions || []).indexOf('sessions.view') >= 0,
   },
 
   actions: {
@@ -114,7 +122,10 @@ export const useAuthStore = defineStore('auth', {
       if (!this.currentStoreName && this.stores.length) {
         this.currentStoreName = this.stores[0].name
       }
-      this.permissions = data.permissions || []
+      // ★ 2026-10-12：云端给的是 `accountPerms`（不是 `permissions`），
+      //   而且字段名刻意与 V3 操作员的 `perms`（那是个权限字典）分开 ——
+      //   所以这里两个名字都要认，只改一处就是"界面入口永不出现"。
+      this.permissions = data.accountPerms || data.permissions || []
       this.merchants = data.merchants || []
       // ★ 选中的账套必须还在清单里，否则清成"不点名"。
       //   平台方把第二本撤掉之后，客户端里那个残留选择会让每个请求都带一个越界的

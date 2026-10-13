@@ -34,9 +34,11 @@
       <view class="row row--divided">
         <text class="row__label">打印份数</text>
         <view class="stepper">
-          <view class="stepper__btn" @click="decCopies" hover-class="hv-on" :hover-stay-time="80"><text>−</text></view>
+          <!-- ★ 加减用线性图标，不用排版符号（字体的加减号粗细与基线不齐，全站图标一律走 icon-paths 那一套；
+               减号那把是这一轮新补的键） -->
+          <view class="stepper__btn" @click="decCopies" hover-class="hv-on" :hover-stay-time="80"><Icon name="minus" :size="14" color="primary" /></view>
           <text class="stepper__val tnum">{{ copies }}</text>
-          <view class="stepper__btn" @click="incCopies" hover-class="hv-on" :hover-stay-time="80"><text>+</text></view>
+          <view class="stepper__btn" @click="incCopies" hover-class="hv-on" :hover-stay-time="80"><Icon name="plus" :size="14" color="primary" /></view>
         </view>
       </view>
     </view>

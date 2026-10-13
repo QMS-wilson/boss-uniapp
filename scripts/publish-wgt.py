@@ -22,10 +22,11 @@
         --url-prefix https://v3jxc.duckdns.org/release ^
         --notes "修首页统计与打印入口" [--force] [--allow-same] [--dry-run]
 
-依赖 paramiko + scp ⇒ 必须用带这两个包的解释器：
+依赖 paramiko ⇒ 必须用带这个包的解释器：
     C:/Users/24773/.workbuddy/binaries/python/envs/default/Scripts/python.exe
 """
 import argparse
+import base64
 import hashlib
 import io
 import json
@@ -37,7 +38,6 @@ import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sshtarget  # noqa: E402
-from scp import SCPClient  # noqa: E402
 
 try:  # 控制台是 GBK，打中文会 UnicodeEncodeError
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -141,11 +141,86 @@ def write_manifest_local(manifest):
 
 
 # ---------------- 远端 ----------------
+_CONN = {"cli": None}
+
+
+def _alive(cli):
+    return cli is not None and cli.get_transport() is not None and cli.get_transport().is_active()
+
+
+def connect():
+    """进程内复用同一条 SSH 连接；已经断了就换一条新的。"""
+    if _alive(_CONN["cli"]):
+        return _CONN["cli"]
+    _CONN["cli"] = sshtarget.connect()
+    return _CONN["cli"]
+
+
 def run(cli, cmd, timeout=120):
-    _, out, err = cli.exec_command(cmd, timeout=timeout)
-    o = out.read().decode("utf-8", "ignore")
-    e = err.read().decode("utf-8", "ignore")
-    return out.channel.recv_exit_status(), o, e
+    """远程命令。连接被掐就重连重试一次（见 put_file_chunked 的说明）。"""
+    for attempt in (0, 1):
+        c = cli if (attempt == 0 and _alive(cli)) else connect()
+        try:
+            _, out, err = c.exec_command(cmd, timeout=timeout)
+            o = out.read().decode("utf-8", "ignore")
+            e = err.read().decode("utf-8", "ignore")
+            code = out.channel.recv_exit_status()
+        except Exception:
+            if attempt:
+                raise
+            log("   ! 连接断了，重连后重试这一条命令")
+            continue
+        _CONN["cli"] = c
+        return code, o, e
+
+
+def remote_size(cli, path):
+    code, o, _ = run(cli, "wc -c < %s 2>/dev/null || echo -1" % path)
+    try:
+        return int(o.strip().split()[-1])
+    except (ValueError, IndexError):
+        return -1
+
+
+def put_file_chunked(cli, local_path, remote_path, chunk=12288, tries=4):
+    """分块 base64 追加上传，每块落地后拿远端字节数对一次数，最后比整份 sha256。
+
+    ★ 为什么不用 scp（2026-10-12 深夜，与 scripts/deploy.py 同一个坑）：
+      `SCPClient.put` 在这条链上连着死在半路两次（10054 复位 / 等不到 confirm），
+      而同一时刻几 KB 的小命令全通 —— 坏的是"一条通道上持续大块写"。
+      ★ 这里更要小心：wgt 是**往客户手机里塞代码**，传了一半的包不会报错，
+      只会装出半个应用。所以整份 sha256 不一致就 False，绝不改清单。
+    """
+    raw = open(local_path, "rb").read()
+    b64 = base64.b64encode(raw).decode()
+    parts = [b64[i:i + chunk] for i in range(0, len(b64), chunk)]
+    staging = remote_path + ".b64"
+    code, _, _ = run(cli, ": > %s && echo OPEN_OK" % staging)
+    if code != 0:
+        log("   ✗ 建临时文件失败")
+        return False
+    good = 0
+    for i, part in enumerate(parts):
+        expect = good + len(part)
+        for _attempt in range(tries):
+            run(cli, "printf %%s '%s' >> %s" % (part, staging))
+            if remote_size(cli, staging) == expect:
+                good = expect
+                break
+            log("   ! 第 %d/%d 块没对上，截回好长度重发" % (i + 1, len(parts)))
+            run(cli, "head -c %d %s > %s.cut && mv -f %s.cut %s"
+                % (good, staging, staging, staging, staging))
+        else:
+            log("   ✗ 第 %d/%d 块重传 %d 次仍失败，放弃" % (i + 1, len(parts), tries))
+            run(cli, "rm -f %s" % staging)
+            return False
+    code, o, _ = run(cli, "base64 -d %s > %s && rm -f %s && sha256sum %s | cut -d' ' -f1"
+                     % (staging, remote_path, staging, remote_path))
+    if code != 0 or o.strip() != hashlib.sha256(raw).hexdigest():
+        log("   ✗ 整份 sha256 不符：" + (o or "").strip()[:120])
+        run(cli, "rm -f %s" % remote_path)
+        return False
+    return True
 
 
 def current_manifest(cli):
@@ -195,7 +270,8 @@ def main():
     }
 
     if a.dry_run:
-        log("   [dry-run] scp %s → %s/%s" % (os.path.basename(local), RELEASE_DIR, fname))
+        log("   [dry-run] 分块上传 %s → %s/%s（整份 sha256 对上才改清单）"
+            % (os.path.basename(local), RELEASE_DIR, fname))
         log("   [dry-run] 写 %s = %s" % (MANIFEST_REMOTE, json.dumps(manifest, ensure_ascii=False)))
         log("✓ 演练完成（没连服务器）")
         return 0
@@ -218,8 +294,8 @@ def main():
                     "确实要重发同一个码就加 --allow-same" % code)
 
         run(cli, "mkdir -p %s" % RELEASE_DIR)
-        with SCPClient(cli.get_transport()) as scp:
-            scp.put(local, RELEASE_DIR + "/" + fname)
+        if not put_file_chunked(cli, local, RELEASE_DIR + "/" + fname):
+            die("wgt 没传完整（分块上传失败），清单没动，现网还是上一版")
 
         # 逐字节核对：传了一半的包 = 客户机上装出半个应用
         st, o, e = run(cli, "sha256sum %s/%s" % (RELEASE_DIR, fname))
@@ -228,12 +304,12 @@ def main():
         log("   ✓ wgt 已上传且 sha256 一致")
 
         tmp = "/tmp/jxc-app-version.json"
-        with SCPClient(cli.get_transport()) as scp:
-            scp.put(write_manifest_local(manifest), tmp)
-        st, _, e = run(cli, "mv %s %s && test -f %s && echo WROTE"
-                       % (tmp, MANIFEST_REMOTE, MANIFEST_REMOTE))
-        if st != 0:
-            die("清单没写进去：%s" % e.strip()[:160])
+        # 清单只有几百字节，一条命令带过去就够（不必走分块那套）
+        b64 = base64.b64encode(open(write_manifest_local(manifest), "rb").read()).decode()
+        st, o, e = run(cli, "printf %%s '%s' | base64 -d > %s && mv -f %s %s && test -f %s && echo WROTE"
+                       % (b64, tmp, tmp, MANIFEST_REMOTE, MANIFEST_REMOTE))
+        if st != 0 or "WROTE" not in o:
+            die("清单没写进去：%s" % (e or o).strip()[:160])
         log("   ✓ 清单已更新")
 
         # 两条本机探活：路由与 nginx 各是一条独立上线动作，没上线时这里会告诉我们

@@ -96,6 +96,10 @@
       </view>
     </template>
 
+    <!-- ★ 查询失败 ⇒ 错误块（原因 + 点击重试），必须排在「请选择客户与日期」之前：
+         以前失败只剩一支 toast，页面落回空态，看着像"这人没业务"（2026-10-12）。 -->
+    <LoadState v-else-if="queryError" :error="queryError" @retry="load" />
+
     <EmptyState
       v-else-if="!loading"
       icon="file-text"
@@ -141,13 +145,18 @@ import { fmtMoneyGroup, fmtDate } from '../../utils/format'
 import { exportCsv } from '../../utils/export'
 import Icon from '../../components/Icon.vue'
 import EmptyState from '../../components/EmptyState.vue'
+import LoadState from '../../components/LoadState.vue'
 import StopTag from '../../components/StopTag.vue'
 
 const customerId = ref('')
 const customerName = ref('')
+/** ★ 查询失败的原因（空串=没失败）：要落在界面上，不能只飘一支 toast 就把页面交回空态 */
+const queryError = ref('')
 const customers = ref([])
 const startDate = ref('')
 const endDate = ref('')
+/** 从报表首页带进来的区间（两个都是 `YYYY-MM-DD` 才算，缺一个就按本月） */
+const presetRange = ref(null)
 const statement = ref(null)
 const loading = ref(false)
 // ★ 请求代际：选客户/改期间在 loading 里照样能点，旧慢响应后到会把 A 客户的金额
@@ -221,6 +230,13 @@ function shortDate(d) {
  *   从它们跳到对账页，同一句"本月"圈的单不一样，两个页面对不出数。
  */
 function defaultRange() {
+  // ★ 报表首页带过来的期间优先（?from=&to=，见 report/index.vue 的 go()）：
+  //   早先这一页恒按"本月"，从报表页选了上季度点进来却回到本月，期间像是没带过去。
+  if (presetRange.value) {
+    startDate.value = presetRange.value.from
+    endDate.value = presetRange.value.to
+    return
+  }
   const now = new Date()
   const y = now.getFullYear(), m = now.getMonth()
   startDate.value = fmtDate(new Date(y, m, 1))
@@ -245,13 +261,15 @@ async function load() {
   }
   const my = ++loadSeq
   loading.value = true
+  queryError.value = ''
   const res = await reportApi.statement({
     customerId: customerId.value, from: startDate.value, to: endDate.value,
   })
   if (my !== loadSeq) return    // 已有更新的查询发出，这次响应作废
   loading.value = false
   statement.value = res.ok ? res.data : null
-  if (!res.ok) uni.showToast({ title: res.message || '查询失败', icon: 'none' })
+  // ★ 失败落到错误块（带原因 + 点击重试），不再只有一闪而过的 toast
+  queryError.value = res.ok ? '' : String(res.message || '查询失败，点此重试')
 }
 
 /** 导出对账明细（发给客户/存档）。金额按借贷分列，末尾带应收余额。 */
@@ -280,6 +298,9 @@ onLoad((q) => {
   if (q && q.customerId) {
     customerId.value = q.customerId
     customerName.value = q.name ? decodeURIComponent(q.name) : ''
+  }
+  if (q && /^\d{4}-\d{2}-\d{2}$/.test(q.from || '') && /^\d{4}-\d{2}-\d{2}$/.test(q.to || '')) {
+    presetRange.value = { from: q.from, to: q.to }
   }
 })
 

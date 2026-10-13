@@ -23,9 +23,10 @@ export const yxApi = {
   /** 表格矩阵 → 逐行匹配结果（解析/归一化/匹配全在 Agent，与桌面同一套） */
   match: (sheets) => call('yxparts.match', { sheets }),
 
-  /** 未匹配行的候选物料（与桌面双击弹窗同序同值） */
-  suggest: (row, keyword = '') => call('yxparts.suggest', {
-    name: row.name, spec: row.spec, actual: row.actual, keyword,
+  /** 未匹配行的候选物料（与桌面双击弹窗同序同值）
+   *  search=true：不套相似度门槛，在整库里按关键词搜（编号/客户品名/系统品名/规格都算命中） */
+  suggest: (row, keyword = '', search = false) => call('yxparts.suggest', {
+    name: row.name, spec: row.spec, actual: row.actual, keyword, search: search ? 1 : 0,
   }),
 
   /** 人工确认 → 写 Agent 本地记忆库（同一客户写法下次自动命中） */

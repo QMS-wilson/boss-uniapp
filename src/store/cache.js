@@ -16,6 +16,24 @@ const LEGACY_DRAFT_KEY = 'jxc_drafts'   // 只用于认领旧草稿，不删裸�
 const cacheBucket = () => storageKey('jxc_cache') + databaseSuffix()
 const draftBucket = () => storageKey('jxc_drafts') + databaseSuffix()
 
+/**
+ * 自动重放窗口：Agent 的幂等表是 30 分钟纯内存（v3agent/idem.py，进程重启即清空），
+ * 留 5 分钟余量。★ 导出来给页面用 —— 草稿行上"为什么没自动传"必须和这里同一口径，
+ * 不能两边各写一个 25 分钟。
+ */
+export const IDEM_WINDOW_MS = 25 * 60 * 1000
+
+/** 这条草稿是否已经错过自动重放窗口（只能由人点「上传」） */
+export const pastIdemWindow = (d) =>
+  Date.now() - Number((d && d.createdAt) || 0) > IDEM_WINDOW_MS
+
+/**
+ * 这条草稿是不是"断网留下的、且已经错过自动窗口" ⇒ 草稿行上要说明为什么没自己传上去。
+ * 手动草稿不参与自动上传，本来就没有这件事。
+ */
+export const missedAutoWindow = (d) =>
+  !!d && d.origin !== 'manual' && pastIdemWindow(d)
+
 export const useCacheStore = defineStore('cache', {
   state: () => ({
     data: {},     // { [cacheKey]: { value, at } }
@@ -162,7 +180,6 @@ export const useCacheStore = defineStore('cache', {
       try {
         const mine = merchantCode()
         const myDb = selectedDatabase()
-        const IDEM_WINDOW = 25 * 60 * 1000        // 30 分钟窗，留 5 分钟余量
         const results = []
         for (const d of [...this.drafts]) {
           // ★ 两道归属过滤，缺一就可能写错账：
@@ -171,7 +188,7 @@ export const useCacheStore = defineStore('cache', {
           //   归属不明的旧草稿（没有 mkt 标记）宁可留在列表里不传，也不猜。
           if (String(d.mkt || '') !== mine) continue
           if (String(d.db || '') !== myDb) continue
-          if (Date.now() - Number(d.createdAt || 0) > IDEM_WINDOW) {
+          if (pastIdemWindow(d)) {
             results.push({
               id: d.id, ok: false, stale: true,
               message: '离线时存的这条已超过重放窗口，自动上传可能建出第二张：'

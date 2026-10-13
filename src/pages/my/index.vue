@@ -32,7 +32,7 @@
       <view class="settings__row" @click="goPrint" hover-class="hv-on" :hover-stay-time="80">
         <text class="settings__label">打印机</text>
         <view class="settings__value muted">
-          <text>{{ caps?.printers ? caps.printers + ' 台可用' : '未连接' }}</text>
+          <text>{{ printerText }}</text>
           <Icon name="chevron-right" :size="16" />
         </view>
       </view>    </view>
@@ -59,8 +59,13 @@
     <!-- 系统 -->
     <text class="group-title">系统</text>
     <view class="card settings">
-      <view class="settings__row" @click="goInventory" hover-class="hv-on" :hover-stay-time="80">
-        <text class="settings__label">库存查询</text>
+      <!-- ★ 2026-10-12：「库存查询」这一行已移除 —— 首页的入口那一格就是它，
+           两个地方进同一个页面是重复入口（与下面「打印设置」当年撤掉的理由同一类）。 -->
+      <!-- ★ 2026-10-12：成员管理（谁在用 App / 把谁踢下线）。
+           只在账号被授予 sessions.view 时出现 —— 权限位由云端登录响应带回来，
+           云端接口还会再校验一次，所以这里不出现 = 真的没权限，不是前端藏了。 -->
+      <view v-if="auth.canManageSessions" class="settings__row" @click="goSessions" hover-class="hv-on" :hover-stay-time="80">
+        <text class="settings__label">成员管理</text>
         <view class="settings__value muted"><Icon name="chevron-right" :size="16" /></view>
       </view>
       <!-- ★ 2026-09-23：「打印设置」已移除 —— 它与「设备与连接」模块里的「打印机」重复
@@ -123,17 +128,33 @@ const initial = computed(() => {
  *   - backendKnown 有值 + error   → 连接异常（橙），并把原因带到弹窗
  *   - 后端未上报 dbStatus          → 显示「—」，改成中性色，**不假装正常**
  *     （老版本 Agent 不返回该字段时，宁可显示未知，也不给虚假的确定性）
+ * ★ 2026-10-13：`stale` 也要走「状态未知」。这一格原来不判 stale，于是手机断网时
+ *   读的是缓存里那句 healthy ⇒ 同一屏上「数据连接状态 数据正常（绿）」配
+ *   「本地服务连接 状态未知（灰）」，自相矛盾。缓存里那句确实是真的，但它是**旧的**，
+ *   而这一格回答的是"现在通不通"（10-05 那次假「已连接」修的是同一件事的另一半）。
  */
 const dbText = computed(() => {
   const c = caps.value
   if (!c) return '—'
-  if (!c.dbStatusKnown) return '状态未知'
+  if (c.stale || !c.dbStatusKnown) return '状态未知'
   return c.dbStatus === 'healthy' ? '数据正常' : '连接异常'
 })
 const dbClass = computed(() => {
   const c = caps.value
-  if (!c || !c.dbStatusKnown) return 'muted'
+  if (!c || c.stale || !c.dbStatusKnown) return 'muted'
   return c.dbStatus === 'healthy' ? 'ok' : 'warn'
+})
+
+/**
+ * 「打印机」这一格原来把"读不到"和"一台都没有"说成同一句「未连接」（2026-10-13 改）。
+ * 那台机器没装打印机 ≠ 本地服务不通 —— 说成"未连接"会把人往错的方向查。
+ * ★ 但"问不到"也不能顺着说成"没有"：Agent 离线时 `printers` 是适配出来的 0，
+ *   不是那台机器的事实。所以先按 agentOnline/stale 分流，只有真问到才报台数。
+ */
+const printerText = computed(() => {
+  const c = caps.value
+  if (!c || c.stale || !c.agentOnline) return '状态未知'
+  return c.printers ? c.printers + ' 台可用' : '这台电脑没有可用打印机'
 })
 
 /**
@@ -167,7 +188,8 @@ function goStoreSelect() {
   // 单账套商户点进来只会看到"读的是同一套账"，那就不如不给这个按钮。
   if (auth.hasMultiDatabase) uni.navigateTo({ url: '/pages/store/select' })
 }
-function goInventory() { uni.navigateTo({ url: '/pages/inventory/index' }) }
+function goSessions() { uni.navigateTo({ url: '/pages/session/index' }) }
+/** ★ 2026-10-12：成员管理（在线会话）。入口是否出现由 canManageSessions 决定。 */
 function goPrint() { uni.navigateTo({ url: '/pages/print/index' }) }
 /** ★ 2026-09-23：系统模块新增「系统配置」（页面内容暂留空，后续再填）。 */
 function goConfig() { uni.navigateTo({ url: '/pages/settings/config' }) }

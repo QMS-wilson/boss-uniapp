@@ -171,7 +171,9 @@ onLaunch(async () => {
   }
   if (!auth.isLoggedIn) {
     // Mock 模式自动登录，直接进首页预览
-    if (config.USE_MOCK) {
+    // ★ 带上构建期判据：生产构建里这段（含 demo/demo 这对占位口令）整块被消掉，
+    //   不再躺在三端产物里（2026-10-12，与 utils/request.js 那一处同一批）
+    if (process.env.NODE_ENV !== 'production' && config.USE_MOCK) {
       const res = await authApi.login('password', { account: 'demo', password: 'demo' })
       if (res.ok) auth.setLogin(res.data)
     } else {
@@ -199,11 +201,15 @@ onLaunch(async () => {
 /**
  * 重放结果里"要人看一眼"的那部分说出来。
  * ★ 只报第一次见到的那条，否则每次回前台都弹一句同样的话。
+ * ★ `stale` 那类**不弹**（2026-10-13）：「超过自动重放窗口」不是这次上传出的事，
+ *   而是那条草稿从此以后的性质 —— 它就一直躺在草稿箱里等人点上传。
+ *   于是每杀一次进程、`warned` 一清空，回前台就又弹一遍同样的话，
+ *   现场表现就是"App 总是时不时提示这句"。该说的地方是草稿行（见 sales/list.vue 的 draftNote）。
  */
 const warned = {}
 function reportFlush(p) {
   Promise.resolve(p).then((rs) => {
-    const bad = (rs || []).filter((x) => x && !x.ok && !x.skipped)
+    const bad = (rs || []).filter((x) => x && !x.ok && !x.skipped && !x.stale)
     bad.forEach((x) => {
       if (warned[x.id]) return
       warned[x.id] = 1

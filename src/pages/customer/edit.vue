@@ -64,6 +64,7 @@ import { customerApi } from '../../api/customer'
 import { toast } from '../../utils/format'
 import { PRICE_SCHEMES } from '../../utils/adapt'
 import { markBillWritten } from '../../utils/billWrites'
+import { useBillExitGuard } from '../../utils/billExitGuard'
 import Icon from '../../components/Icon.vue'
 
 const mode = ref('create')
@@ -76,6 +77,25 @@ const typeNames = ref([])
 //   提交时 phone→SJ、tel→Tel（save_customer 就是读这两个键），
 //   不要把适配层合并展示用的 phone 直接当 Tel 用。
 const form = reactive({ name: '', code: '', type: '', typeId: '', contact: '', mobile: '', phone: '', address: '', remark: '', priceTrace: 200, priceTypeXs: 0 })
+
+/**
+ * ★★ 中途退出挽留（2026-10-12 补）：档案三页原先是裸 `navigateBack`，
+ *   填了一半点取消/返回，字直接没了，也不问一句 —— 开单页早就有这套判断，档案页漏了。
+ *   档案**没有草稿箱**，所以 `canDraft` 恒 false：只问「放弃修改 / 继续改」，
+ *   绝不静默留一份（那等于凭空多出一条意图，销售那边"拦不住端才静默存"的规则在这里没有对应物）。
+ *   开关沿用系统配置里那一格（billExitAsk）：全局关了挽留的人，不该在档案页被新拦下来。
+ */
+const ready = ref(false)
+const guard = useBillExitGuard({
+  ready: () => ready.value,
+  editable: () => true,
+  hasContent: () => !!(form.name || form.code || form.contact || form.mobile
+    || form.phone || form.address || form.remark),
+  canDraft: () => false,
+  sig: () => form,
+  askText: () => ({ discardContent: '离开后这些填写内容不会保存，确认放弃？' }),
+  saving: () => saving.value,
+})
 
 /** 价格方案：7 个按价格类型 + 1 个最近销价 */
 const schemeNames = [...PRICE_SCHEMES.map((s) => s.label), '最近销价']
@@ -111,6 +131,9 @@ async function load() {
       if (d.priceTypeXs != null) form.priceTypeXs = d.priceTypeXs
     }
   }
+  // ★ 回填到手的样子才是"没改过"的基线：拿空表单比会把水合字段当成人的改动
+  ready.value = true
+  guard.markClean()
 }
 function onTypePick(e) {
   const t = types.value[e.detail.value]
@@ -141,10 +164,14 @@ async function onSave() {
   }
   const res = mode.value === 'create' ? await customerApi.create(payload) : await customerApi.update(editId.value, payload)
   saving.value = false
-  if (res.ok) { markBillWritten('customer'); toast('保存成功', 'success'); goBack() }
-  else toast(res.message || '保存失败')
+  if (res.ok) {
+    // ★ 已经落库 ⇒ 这一页没有"还没保存的东西"了，先让闸门再走，否则返回会被自己拦一道
+    guard.allowLeave()
+    markBillWritten('customer'); toast('保存成功', 'success'); goBack()
+  } else toast(res.message || '保存失败')
 }
-function goBack() { uni.navigateBack() }
+/** 页内「取消」与返回键走同一个判定（只拦返回键等于留一个能绕过挽留的洞） */
+function goBack() { if (guard.tryBack()) return; uni.navigateBack() }
 
 // ★ 详情页跳过来带的是 ?mode=edit&code=xxx（历史上只带了 code，这里按有 id 就算编辑兜底）
 onLoad((q) => {

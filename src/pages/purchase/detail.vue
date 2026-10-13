@@ -102,12 +102,11 @@
       <EmptyState v-else-if="!loading" text="请选择采购单" sub="从采购单列表进入详情" />
     </LoadState>
 
-    <!-- 底部操作 -->
+    <!-- 底部操作
+         ★ 原先这里挂着一颗「打印」，点了只回一句"后端暂未开放"—— 画出来又办不了
+           就是动线里的死胡同（采购没有打印 op：云端 PRINT_OPS 只有 print.salesbill）。
+           没有能力就不渲染，底栏只剩"修改/不可修改"那一颗。 -->
     <view v-if="bill" class="action-bar">
-      <button class="btn-ghost action-bar__btn" @click="onPrint">
-        <Icon name="printer" :size="18" color="text-2" />
-        <text>打印</text>
-      </button>
       <button class="action-bar__btn"
               :class="canModify ? 'btn-primary' : 'btn-ghost is-disabled'" @click="goEdit">
         <text>{{ modifyLabel }}</text>
@@ -157,11 +156,6 @@ async function load() {
   else error.value = res.message
 }
 
-function onPrint() {
-  // ★ 后端只有 print.salesbill（销售单），没有采购单打印 op。
-  //   照实说明，不要伪造一个「打印成功」的 toast。
-  uni.showToast({ title: '采购单打印后端暂未开放', icon: 'none' })
-}
 /**
  * 能不能真改这张单：本地服务发布过这个动作 + 这张单本身允许，两个条件缺一不可。
  * ★ 能力那一半问的是 Agent 报回来的动作清单（`hasOp`），不是源码里的常量 ——

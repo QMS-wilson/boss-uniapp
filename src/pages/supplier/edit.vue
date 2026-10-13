@@ -70,6 +70,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import { supplierApi } from '../../api/purchase'
 import { toast } from '../../utils/format'
 import { markBillWritten } from '../../utils/billWrites'
+import { useBillExitGuard } from '../../utils/billExitGuard'
 import Icon from '../../components/Icon.vue'
 
 /**
@@ -89,6 +90,23 @@ const form = reactive({
   name: '', code: '', type: '', typeCode: '',
   contact: '', phone: '', tel: '', address: '',
   bankName: '', bankId: '', remark: '',
+})
+
+/**
+ * ★★ 中途退出挽留（2026-10-12 补，与客户档案同一套）：原先这页是裸 `navigateBack`，
+ *   填了一半点取消，银行账号那些字全没了也不问一句。
+ *   档案没有草稿箱 ⇒ `canDraft` 恒 false，只问「放弃修改 / 继续改」。
+ */
+const ready = ref(false)
+const guard = useBillExitGuard({
+  ready: () => ready.value,
+  editable: () => true,
+  hasContent: () => !!(form.name || form.code || form.contact || form.phone
+    || form.tel || form.address || form.bankName || form.bankId || form.remark),
+  canDraft: () => false,
+  sig: () => form,
+  askText: () => ({ discardContent: '离开后这些填写内容不会保存，确认放弃？' }),
+  saving: () => saving.value,
 })
 
 async function load() {
@@ -111,6 +129,9 @@ async function load() {
       form.remark = d.remark || ''
     }
   }
+  // ★ 回填到位之后才立基线（判脏不许掺水合字段，口径同开单页）
+  ready.value = true
+  guard.markClean()
 }
 function onTypePick(e) {
   const t = types.value[e.detail.value]
@@ -134,10 +155,13 @@ async function onSave() {
   }
   const res = mode.value === 'create' ? await supplierApi.create(payload) : await supplierApi.update(editId.value, payload)
   saving.value = false
-  if (res.ok) { markBillWritten('supplier'); toast('保存成功', 'success'); goBack() }
-  else toast(res.message || '保存失败')
+  if (res.ok) {
+    guard.allowLeave()
+    markBillWritten('supplier'); toast('保存成功', 'success'); goBack()
+  } else toast(res.message || '保存失败')
 }
-function goBack() { uni.navigateBack() }
+/** 页内「取消」与返回键走同一个判定 */
+function goBack() { if (guard.tryBack()) return; uni.navigateBack() }
 
 onLoad((q) => {
   editId.value = q.id || q.code || ''

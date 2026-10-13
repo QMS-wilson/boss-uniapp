@@ -84,8 +84,12 @@ export const receivableApi = {
     return res
   },
   summary: async (params = {}) => {
-    const res = await reportHttp.get('/reports/receivables/summary', buildReceivableQ(params), {
-      cacheKey: 'receivables', offlineOk: true,
+    // ★★ cacheKey 必须含筛选（与 product.js 的 `products:JSON.stringify(q)` 同一套路）：
+    //   早先固定写死 'receivables'，于是带着关键字/停用开关的那一枪在**断网时**
+    //   会把"无筛选"那份缓存当结果回给页面 —— 界面看着像查过了，其实是另一套数。
+    const q = buildReceivableQ(params)
+    const res = await reportHttp.get('/reports/receivables/summary', q, {
+      cacheKey: 'receivables:' + JSON.stringify(q), offlineOk: true,
     })
     if (res.ok) res.data = toReceivables(res.data)
     return res

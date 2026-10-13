@@ -1278,7 +1278,9 @@ async function load() {
       unit: it.unit || '',
       qty: it.qty,
       price: it.price,
-      amount: it.amount != null ? it.amount : Number(it.qty || 0) * Number(it.price || 0),
+      // ★ 后端没给折后金额才现算：走 mulMoney（半偶、与库里同一口径），
+      //   赠品行记 0（J_JEZK 本来就不计钱），不再留一个"不取整的裸乘法"给合计对不上。
+      amount: it.amount != null ? it.amount : (it.gift ? 0 : mulMoney(Number(it.qty || 0), Number(it.price || 0))),
       priceSource: it.price_source || it.priceSource || '',
       remark: it.remark ?? '',
       gift: !!it.gift,
@@ -1877,7 +1879,9 @@ onShow(() => {
 }
 /* 箭头第一行对齐品名：展开后品名可能折 3 行，图标跟着"跑到中间"会看不出是哪个元素的开合 */
 .it-name-line--open :deep(.icon-svg) { margin-top: 8rpx; }
-.it-del { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; color: $color-danger; padding: 0 8rpx; }
+/* ★ 删行是**不可撤销的单个目标**（删完这行内容就没了），热区按 U6 的 88rpx 下限撑开；
+   图标本身仍是 20，不跟着变大（视觉密度不动，只是手指好点些）。 */
+.it-del { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; color: $color-danger; min-height: 88rpx; padding: 0 12rpx; }
 /* 规格：收起态挤在品名同行（flex:1 让它吃掉余宽 ⇒ 箭头自然靠右对齐，每行位置都一样，
    不会因为品名长短而左右跳）；展开态它是 .it-spec-row 的唯一子元素，独占一整行。
    ★ 上下边距与改造前的 `.it-spec` 完全一致（10/18rpx）—— 行距断言量的是相邻明细卡片的

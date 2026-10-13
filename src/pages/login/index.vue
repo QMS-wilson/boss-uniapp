@@ -90,6 +90,7 @@ import { useAuthStore } from '../../store/auth'
 import { authApi } from '../../api/auth'
 import { toast } from '../../utils/format'
 import { merchantCode, selectedDatabase, setSelectedDatabase, storageKey, databaseSuffix } from '../../utils/merchant'
+import { takeJumpFlag } from '../../utils/listJump'
 
 const auth = useAuthStore()
 const loading = ref(false)
@@ -313,7 +314,23 @@ async function onLogin() {
   }
 }
 
-function goHome() { uni.switchTab({ url: '/pages/home/index' }) }
+/**
+ * 登录后落在哪：被「会话失效」踢下来时记的那一页优先（见 utils/request.js 的 _rememberReturnPage），
+ * 其余情况照旧回首页。
+ * ★ 用 reLaunch 而不是 navigateTo：登录页是栈底，回跳目标可能是详情页也可能是 tabBar 页，
+ *   reLaunch 两种都走得通，且不会留下一条"登录页还在栈里"的尾巴。
+ * ★ 十分钟之内的才算：隔了一夜再登录还把人扔回昨天那张单，看着像页面坏了。
+ */
+function goHome() {
+  const back = takeJumpFlag('login_return')
+  const path = back && back.path
+  const fresh = back && Number(back.at) && (Date.now() - Number(back.at) < 10 * 60 * 1000)
+  if (fresh && typeof path === 'string' && path.indexOf('/pages/') === 0) {
+    uni.reLaunch({ url: path })
+    return
+  }
+  uni.switchTab({ url: '/pages/home/index' })
+}
 
 loadOptions()
 

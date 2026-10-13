@@ -26,7 +26,7 @@
     python scripts/deploy.py --merchant yedian --rollback <buildid|previous>
     python scripts/deploy.py --check                              # 连通性与服务状态
 
-依赖：paramiko, scp —— 必须用带这两个包的解释器：
+依赖：paramiko —— 必须用带这个包的解释器：
     C:/Users/24773/.workbuddy/binaries/python/envs/default/Scripts/python.exe
 """
 import argparse
@@ -41,8 +41,6 @@ import subprocess
 import sys
 import tarfile
 import time
-
-from scp import SCPClient
 
 try:  # 控制台是 GBK，打 ✓ 会 UnicodeEncodeError
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -127,16 +125,44 @@ def step(msg):
 
 
 # ---------------- SSH ----------------
+_CONN = {"cli": None}
+
+
+def _alive(cli):
+    return cli is not None and cli.get_transport() is not None and cli.get_transport().is_active()
+
+
 def connect():
-    return sshtarget.connect()
+    """进程内复用同一条 SSH 连接；已经断了就换一条新的。"""
+    if _alive(_CONN["cli"]):
+        return _CONN["cli"]
+    _CONN["cli"] = sshtarget.connect()
+    return _CONN["cli"]
 
 
 def run(cli, cmd, timeout=300, quiet=True):
-    """只读远程命令（dry-run 也照跑，用来取现状）"""
-    _, out, err = cli.exec_command(cmd, timeout=timeout)
-    o = out.read().decode("utf-8", "ignore")
-    e = err.read().decode("utf-8", "ignore")
-    code = out.channel.recv_exit_status()
+    """远程命令（dry-run 也照跑，用来取现状）。连接被掐就重连重试一次。
+
+    ★ 为什么要有这段：2026-10-12 深夜这条链（开发机 → 149.88.75.125:22）
+      在半路复位两次（WinError 10054 / 发完等不到 confirm），
+      但同一时刻几 KB 的小命令全通 —— 坏的是"持续大字节流"，不是连接本身。
+      所以对症的是**命令级重连 + 上传分块**（见 put_file_chunked），
+      而不是"整场发布失败后让人再跑一遍"。
+    """
+    for attempt in (0, 1):
+        c = cli if (attempt == 0 and _alive(cli)) else connect()
+        try:
+            _, out, err = c.exec_command(cmd, timeout=timeout)
+            o = out.read().decode("utf-8", "ignore")
+            e = err.read().decode("utf-8", "ignore")
+            code = out.channel.recv_exit_status()
+        except Exception as ex:
+            if attempt:
+                raise
+            log("   ! 连接断了(%s)，重连后重试这一条命令" % type(ex).__name__)
+            continue
+        _CONN["cli"] = c
+        break
     if not quiet and o.strip():
         for line in o.strip().split("\n")[:60]:
             log("   " + line)
@@ -163,6 +189,69 @@ def put_text(cli, path, text, note):
     code, _, _ = write_remote(
         cli, f"printf %s '{b64}' | base64 -d > {tmp} && mv -f {tmp} {path} && echo WROTE", note)
     return code == 0
+
+
+def remote_size(cli, path):
+    """远端文件当前字节数；文件不存在返回 -1。"""
+    code, o, _ = run(cli, f"wc -c < {path} 2>/dev/null || echo -1")
+    try:
+        return int(o.strip().split()[-1])
+    except (ValueError, IndexError):
+        return -1
+
+
+def put_file_chunked(cli, local_path, remote_path, chunk=12288, tries=4):
+    """分块 base64 追加上传一份本地文件，每块落地后拿远端字节数对一次数。
+
+    ★ 为什么不用 scp（2026-10-12 深夜）：`SCPClient.put` 连着死在**半路**两次，
+      一次 WinError 10054 连接复位、一次发完了等不到 confirm 超时；
+      而同一时刻同一台机上几 KB 的 exec 命令全通（nginx 配置就是那时候写进去的）。
+      坏的是"一条通道上持续大块写"，不是连接本身 ⇒ 把一次 404KB 的写拆成
+      几十条 12KB 的小命令，每条都走 run() 的重连逻辑。
+    ★ 掉线那一块不许"接着猜"：字节数对不上就把 .b64 截回上一个已知好长度
+      （`head -c`）再重发这一块；整份文件最后比一次 sha256，
+      对不上直接 False —— 绝不拿半成品去解压。
+    """
+    raw = open(local_path, "rb").read()
+    b64 = base64.b64encode(raw).decode()
+    parts = [b64[i:i + chunk] for i in range(0, len(b64), chunk)]
+    staging = remote_path + ".b64"
+    code, _, _ = run(cli, f": > {staging} && echo OPEN_OK")
+    if code != 0:
+        log("   ✗ 建临时文件失败")
+        return False
+    good = 0
+    for i, part in enumerate(parts):
+        expect = good + len(part)
+        for attempt in range(tries):
+            run(cli, "printf %%s '%s' >> %s" % (part, staging))
+            if remote_size(cli, staging) == expect:
+                good = expect
+                break
+            log("   ! 第 %d/%d 块没对上（期望 %d），截回好长度重发"
+                % (i + 1, len(parts), expect))
+            run(cli, "head -c %d %s > %s.cut && mv -f %s.cut %s"
+                       % (good, staging, staging, staging, staging))
+        else:
+            log("   ✗ 第 %d/%d 块重传 %d 次仍失败，放弃本次上传" % (i + 1, len(parts), tries))
+            run(cli, f"rm -f {staging}")
+            return False
+        if (i + 1) % 10 == 0 or i + 1 == len(parts):
+            log("   已传 %d KB / %d KB" % (good * 3 // 4 // 1024, len(raw) // 1024))
+    code, o, _ = run(cli, "base64 -d %s > %s && rm -f %s && sha256sum %s | cut -d' ' -f1"
+                          % (staging, remote_path, staging, remote_path))
+    if code != 0:
+        log("   ✗ 解码失败 " + o.strip()[:200])
+        return False
+    want = hashlib.sha256(raw).hexdigest()
+    if o.strip() != want:
+        log("   ✗ 整份 sha256 不符 期望 %s 实得 %s" % (want[:12], o.strip()[:12]))
+        run(cli, f"rm -f {remote_path}")
+        return False
+    log("   ✓ 分块上传完成，整份 sha256 一致")
+    return True
+
+
 
 
 # ---------------- 本地构建 ----------------
@@ -322,11 +411,11 @@ def upload_build(cli, files, build_id, total):
     remote_tar = f"/tmp/_deploy_h5_{build_id}.tar.gz"
     log(f"   上传 {os.path.getsize(tar_path)/1024:.0f} KB 到 {tmp} ...")
     if DRY:
-        log("   [dry-run] scp 上传 + 解压 + 逐文件 sha256 校验 + 落位 builds/%s" % build_id)
+        log("   [dry-run] 分块上传 + 解压 + 逐文件 sha256 校验 + 落位 builds/%s" % build_id)
         os.remove(tar_path)
         return True
-    with SCPClient(cli.get_transport()) as scp:
-        scp.put(tar_path, remote_tar)
+    if not put_file_chunked(cli, tar_path, remote_tar):
+        return False
     os.remove(tar_path)
     code, _, _ = write_remote(
         cli, f"rm -rf {tmp}; mkdir -p {tmp} && tar -xzf {remote_tar} -C {tmp} "
@@ -521,6 +610,19 @@ def _static_body():
 
     # 最后一个参数 =404 是关键：它让"该商户目录的 index.html 不存在"（=未知商户码）
     # 直接 404，而不是兜到根站或别家去。
+    #
+    # ★ 但**带扩展名的资源**要单独一条挡在前面（2026-10-12）：`/商户码/release/x.wgt`
+    #   这种路径不存在时会被下面那条兜成 `/$c3/index.html` ⇒ **200 + 一段 HTML**。
+    #   App 端下载 wgt 时拿到的就是这种"看着成功、其实是个网页"的响应，
+    #   表现是安装失败或装了个空包，比直接 404 难查十倍。
+    #   ★ 这里必须写成 `.*\\.[A-Za-z0-9]+$` 而不是 `[^/]*\\.[A-Za-z0-9]+$`：
+    #     后者只挡**一层**路径，`/shiwantongda/release/x.wgt`（两层）实测照样兜成 200 HTML，
+    #     而 wgt 的真实地址恰恰就是带 `release/` 这一层的 —— 写错等于没修。
+    #     锚在 `$` 上，所以 `/shiwantongda/sales/detail`（路由末段无点）不受影响。
+    location ~ "^/[a-z0-9_-]+/.*\\.[A-Za-z0-9]+$" {
+        try_files $uri =404;
+    }
+
     location ~ "^/(?<c3>[a-z0-9_-]+)/" {
         try_files $uri $uri/ /$c3/index.html =404;
     }

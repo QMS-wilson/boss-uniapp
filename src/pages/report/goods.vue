@@ -100,6 +100,10 @@
       </view>
     </template>
 
+    <!-- ★ 查询失败 ⇒ 错误块（带原因 + 点击重试）。排在"请选择客户与日期"那张空态**之前**，
+         否则失败会被渲染成"还没查"—— 这是本项目反复出现的"把失败说成空"那一类。 -->
+    <LoadState v-else-if="queryError" :error="queryError" @retry="load" />
+
     <EmptyState
       v-else-if="!loading"
       icon="chart"
@@ -181,13 +185,18 @@ import { exportCsv, saveWorkbook } from '../../utils/export'
 import { buildStatementWorkbook, flattenStatementRows } from '../../utils/statementExcel'
 import Icon from '../../components/Icon.vue'
 import EmptyState from '../../components/EmptyState.vue'
+import LoadState from '../../components/LoadState.vue'
 import StopTag from '../../components/StopTag.vue'
 
 const customerId = ref('')
 const customerName = ref('')
+/** ★ 查询失败的原因（空串=没失败）：必须落在界面上，不能只飘一支 toast 就把页面交回空态 */
+const queryError = ref('')
 const customers = ref([])
 const startDate = ref('')
 const endDate = ref('')
+/** 从报表首页带进来的区间（两个都是 `YYYY-MM-DD` 才算，缺一个就按本月） */
+const presetRange = ref(null)
 const report = ref(null)
 const loading = ref(false)
 // ★ 请求代际：选客户/快捷期间在 loading 里照样能点（不在任何门控区内），
@@ -252,7 +261,16 @@ function setQuick(key) {
   if (canQuery.value) load()
 }
 
-function defaultRange() { setQuick('thisMonth') }
+function defaultRange() {
+  // ★ 报表首页带过来的期间优先（与对账页同一套，见 report/index.vue 的 go()）
+  if (presetRange.value) {
+    startDate.value = presetRange.value.from
+    endDate.value = presetRange.value.to
+    quick.value = ''      // 这个区间对不上任何一颗快捷档，别让它亮着骗人
+    return
+  }
+  setQuick('thisMonth')
+}
 
 function pickCustomer(c) {
   customerId.value = c.id; customerName.value = c.name
@@ -271,13 +289,17 @@ async function load() {
   }
   const my = ++loadSeq
   loading.value = true
+  queryError.value = ''
   const res = await reportApi.customerProducts({
     customerId: customerId.value, from: startDate.value, to: endDate.value,
   })
   if (my !== loadSeq) return    // 已有更新的查询发出，这次响应作废
   loading.value = false
   report.value = res.ok ? res.data : null
-  if (!res.ok) uni.showToast({ title: res.message || '查询失败', icon: 'none' })
+  // ★★ 失败要说得出、也要看得见（2026-10-12）：以前只有一支 toast，
+  //   页面随即落回「请选择客户与日期」那张空态 —— 把"查失败了"演成"还没查"，
+  //   而 toast 1.5 秒就没了，没人来得及看。错误块由 LoadState 出，带原因 + 点击重试。
+  queryError.value = res.ok ? '' : String(res.message || '查询失败，点此重试')
 }
 
 function doExport() {
@@ -381,6 +403,9 @@ onLoad((q) => {
   if (q && q.customerId) {
     customerId.value = q.customerId
     customerName.value = q.name ? decodeURIComponent(q.name) : ''
+  }
+  if (q && /^\d{4}-\d{2}-\d{2}$/.test(q.from || '') && /^\d{4}-\d{2}-\d{2}$/.test(q.to || '')) {
+    presetRange.value = { from: q.from, to: q.to }
   }
 })
 

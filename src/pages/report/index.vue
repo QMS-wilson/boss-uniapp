@@ -49,7 +49,8 @@
             <text>按客户查看应收明细 / 逐家催收</text>
             <Icon name="chevron-right" :size="16" color="text" />
           </view>
-          <text v-if="aging.length" class="ar__hint">{{ receivables.agingNote }}。分段合计 ¥{{ fmtMoneyGroup(receivables.agingTotal) }}{{ agingClosed ? ' = 应收总额 ✓' : ' ≠ 应收总额，请核对' }}</text>
+          <!-- ★ 闭合与否说成人话，不拿排版符号当图标（对勾/不等号在小程序字体里粗细与基线都不稳） -->
+          <text v-if="aging.length" class="ar__hint">{{ receivables.agingNote }}。分段合计 ¥{{ fmtMoneyGroup(receivables.agingTotal) }}{{ agingClosed ? '，与应收总额对得上' : '，与应收总额对不上，请核对' }}</text>
         </template>
       </view>
 
@@ -730,7 +731,20 @@ async function switchGran(key) {
 }
 
 /* ============================ 跳转 / 导出 ============================ */
-function go(name) { uni.navigateTo({ url: `/pages/report/${name}` }) }
+/**
+ * ★ 下钻要把**当前期间**一起带过去（2026-10-12）：报表首页选「上季度」再点进对账/货品明细，
+ *   进来又变回本月 —— 期间在人眼里就是"我刚选的那段时间"，每一步都得重选一遍。
+ *   ★ 应收账款那一格**不带**：它读的是账面全量、与期间无关（页面自己就这么标的），
+ *     带过去等于把"未结应收"说成"这段时间的未结"，那是另一个数。
+ */
+function go(name) {
+  const withRange = name === 'reconcile' || name === 'goods'
+  const r = range.value || {}
+  const qs = withRange && r.from && r.to
+    ? '?from=' + encodeURIComponent(r.from) + '&to=' + encodeURIComponent(r.to)
+    : ''
+  uni.navigateTo({ url: `/pages/report/${name}${qs}` })
+}
 function goCustomer(item) { if (item && item.id) uni.navigateTo({ url: '/pages/customer/detail?code=' + item.id }) }
 function goProduct(item) { if (item && item.id) uni.navigateTo({ url: '/pages/product/detail?id=' + item.id }) }
 

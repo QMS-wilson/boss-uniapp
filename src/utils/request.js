@@ -8,9 +8,10 @@
  */
 import { apiBase, config } from './config'
 import { merchantCode, selectedDatabase } from './merchant'
+import { setJumpFlag } from './listJump'
 import { useAuthStore } from '../store/auth'
 import { useCacheStore } from '../store/cache'
-import { mockRequest } from '../mock/router'
+// ★ mock 不在这里静态导入（会把示例数据带进三端产物），见下面 request() 里的构建期分支
 
 let _refreshing = null // 正在进行的 refresh 请求（去重）
 
@@ -178,8 +179,15 @@ export async function request(opts) {
   const isWrite = method !== 'GET'
 
   // ★ Mock 模式：直接走示例数据，不发起真实请求
-  if (config.USE_MOCK) {
+  //   ★★ 构建期判据 + 动态 import 两件事必须一起做（2026-10-12 修）：
+  //   早先是**无条件静态** `import { mockRequest } from '../mock/router'`，
+  //   `USE_MOCK:false` 是运行时的值、摇不掉那条 import ⇒ 示例数据（含假商户名
+  //   「佛山磨料磨具厂」，mock/ 共 44KB）一路打进 H5/小程序/App 三端产物。
+  //   `process.env.NODE_ENV` 在构建时就被替换成 'production'，整个分支连同
+  //   dynamic import 一起被消除；开发预览仍按 USE_MOCK 走示例数据。
+  if (process.env.NODE_ENV !== 'production' && config.USE_MOCK) {
     try {
+      const { mockRequest } = await import('../mock/router')
       const res = await mockRequest({ url, method, data, params })
       if (res.ok && cacheKey) cache.set(cacheKey, res.data)
       return res
@@ -247,7 +255,7 @@ export async function request(opts) {
           _redirectLogin('AUTH_EXPIRED', '登录状态已失效，请重新登录')
           return _err('AUTH_EXPIRED', '登录状态已失效，请重新登录')
         }
-        return _handle(res2, { cacheKey, cache })
+        return _handle(res2, { cacheKey, cache, draftType, data, url, isWrite })
       }
       // 网络原因导致的刷新失败 → 不清登录态，提示重试
       if (r.network) return _err('NETWORK_ERROR', '网络连接失败，请稍后重试')
@@ -257,7 +265,7 @@ export async function request(opts) {
       return _err('AUTH_EXPIRED', '登录已过期，请重新登录')
     }
 
-    return _handle(res, { cacheKey, cache })
+    return _handle(res, { cacheKey, cache, draftType, data, url, isWrite })
   } catch (e) {
     if (flight.cancelled) return _err('CANCELLED', '请求已取消')
     // ★ 把底层原因带出来：App 端没有 devtools，而「网络连接失败」在手机上
@@ -351,7 +359,7 @@ const FRIENDLY = {
 // 把人登出去反而毁了另一家的正常会话。
 const KICK_TO_LOGIN = ['TENANT_MISMATCH']
 
-function _handle(res, { cacheKey, cache }) {
+function _handle(res, { cacheKey, cache, draftType, data, url, isWrite }) {
   const body = res.data || {}
   // ★ 先挡"回的是网页不是接口"：地址里多带了 /商户码 时，nginx 的 SPA 兜底会把
   //   index.html 交回来 —— GET 是 200（以前会被当成成功数据吃掉），POST 是 405。
@@ -378,6 +386,20 @@ function _handle(res, { cacheKey, cache }) {
   const code = errObj.code || body.code || `HTTP_${res.statusCode}`
   const message = FRIENDLY[code] || errObj.message || body.message || '操作失败，请稍后重试'
   if (KICK_TO_LOGIN.indexOf(code) >= 0) _redirectLogin(code, message)
+  // ★★ 本地服务没连上 ⇒ 与"断网"同一处理：写操作落草稿（2026-10-12）。
+  //   早先草稿只在网络 catch 那条分支落，AGENT_OFFLINE 走的是业务错误分支 ⇒
+  //   页面只回一句"店铺数据服务未连接"，人填的整张单就地蒸发，得从头再填一遍。
+  //   ★ 判据**只认 AGENT_OFFLINE**：这一条是云端在"当前没有 Agent 连接"时直接拒的，
+  //   请求根本没进账套；而 AGENT_TIMEOUT / 502 / 504 那几类**可能已经落库**，
+  //   给它们落草稿 = 服务恢复后重放出第二张单。重放另有一层保险：
+  //   payload 里那把表单实例级 client_token + Agent 侧 30 分钟幂等窗（前端限 25 分钟）。
+  if (code === 'AGENT_OFFLINE' && isWrite && draftType) {
+    const d = cache.addDraft(draftType, data, url)
+    return {
+      ok: true, offline: true, draft: true, draftId: d.id,
+      message: '店铺数据服务未连接，已存为草稿，服务恢复后自动上传',
+    }
+  }
   // ★ `serverMessage` 单独留一份原文：FRIENDLY 是按"业务请求"的话术表，
   //   登录这类需要精确分流的原因（NO_PASSWORD / RATE_LIMITED…）会被它盖掉。
   //   调用方想显示"服务端原话"时读这个键，不要去改 FRIENDLY（改了会影响全站）。
@@ -394,7 +416,31 @@ function _redirectLogin(code, message) {
   if (code) {
     uni.showToast({ title: message || FRIENDLY[code] || '请重新登录', icon: 'none', duration: 3000 })
   }
+  // ★★ 把被踢之前那一页记下来（2026-10-12）：早先这里无条件 reLaunch 到登录页，
+  //   重新登录之后人停在首页 —— 刚才看到的那张单、翻到第 N 页的那张列表全丢了，
+  //   而他本来是去核对一个数的。登录页读这个一次性键，登录成功就送回原页。
+  _rememberReturnPage()
   uni.reLaunch({ url: '/pages/login/index' })
+}
+
+/**
+ * 只记我们自己的路由（`/pages/...`），query 原样带上。
+ * 页面实例上拿 query 的字段两端不一样：小程序在 `options`，H5 在 `$page.options` ⇒ 两个都试。
+ */
+function _rememberReturnPage() {
+  try {
+    const stack = getCurrentPages()
+    const cur = stack[stack.length - 1]
+    const route = cur && (cur.route || cur.__route__ || '')
+    if (!route || String(route).indexOf('pages/login') >= 0) return
+    const opt = cur.options || (cur.$page && cur.$page.options) || {}
+    const qs = Object.keys(opt).map((k) => encodeURIComponent(k) + '=' + encodeURIComponent(opt[k] == null ? '' : opt[k])).join('&')
+    // 带时刻：超过十分钟才重新登录的话，那一页多半已经不是他要看的东西了（登录页判）
+    setJumpFlag('login_return', {
+      path: '/pages/' + String(route).replace(/^\/?pages\//, '') + (qs ? '?' + qs : ''),
+      at: Date.now(),
+    })
+  } catch (e) { /* 记不上就退回登录页，不影响这一次登出 */ }
 }
 
 /* ============ 便捷方法 ============ */

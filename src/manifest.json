@@ -2,8 +2,8 @@
     "name" : "云进销存",
     "appid" : "__UNI__D52D0B9",
     "description" : "进销存移动经营管理端",
-    "versionName" : "1.1.1",
-    "versionCode" : "102",
+    "versionName" : "1.1.14",
+    "versionCode" : "115",
     "transformPx" : false,
     "uniStatistics" : {
         "enable" : false

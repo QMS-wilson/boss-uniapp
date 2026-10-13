@@ -8,7 +8,7 @@
  * 真实销售单详情：  { bill_no, use_no, ndate, bz_xs, customer, warehouse, is_auditing,
  *                    totals:{amount, amount_hs, qty}, lines[], editable, editable_reasons[] }
  */
-import { avgMoney } from './money'
+import { avgMoney, mulMoney, sumMoney } from './money'
 
 /** 未审核/已审核/已作废状态枚举（页面内部统一用字符串）
  *
@@ -175,7 +175,10 @@ function toBillLine(it = {}) {
     unit: it.unit || '',
     qty,
     price,
-    amount: it.amount != null ? num(it.amount) : round2(qty * price),
+    // ★ 后端没给折后金额时自己算：必须走 money.js（十进制精确 + 半偶），
+    //   早先用 round2()=Math.round 是半进位，与库里 J_JEZK 的 quantize 口径差一分，
+    //   而合计走的是 billState 的 mulMoney ⇒ 逐行相加 ≠ 合计。赠品行 J_JEZK 记 0，兜底也跟着记 0。
+    amount: it.amount != null ? num(it.amount) : (it.gift ? 0 : mulMoney(qty, price)),
     priceSource: it.price_source || it.priceSource || '',
     remark: it.remark ?? '',
     // ★ 赠品位（XSMX.Gifts）。口径：单价与金额照记，**折后金额=0** ⇒ 后端给的 `amount`
@@ -734,23 +737,25 @@ export function toCustomerProducts(raw = {}) {
   }))
   // summary 后端已给就用后端的，避免分页时算出来的合计与全量不符
   const sum = raw.summary || {}
+  // ★ 数量与钱两套口径：数量按厂商那两位（round2 只管它），
+  //   **钱一律走 money.js**（逐行已取整再相加、半偶），不再用浮点 reduce。
   const totalQuantity = sum.totalQuantity !== undefined
     ? num(sum.totalQuantity) : round2(items.reduce((s, r) => s + r.quantity, 0))
   const totalAmount = sum.totalAmount !== undefined
-    ? num(sum.totalAmount) : round2(items.reduce((s, r) => s + r.amount, 0))
+    ? sumMoney([sum.totalAmount]) : sumMoney(items.map((r) => r.amount))
   return {
     customerName: raw.customer?.name || '',
     summary: {
       productCount: sum.productCount !== undefined ? num(sum.productCount) : items.length,
       totalQuantity: round2(totalQuantity),
-      totalAmount: round2(totalAmount),
+      totalAmount: sumMoney([totalAmount]),
     },
     items,
     // ★ 明细被后端 limit 截断的标记：合计是全量 SQL 算的，所以「合计 ≠ 列表相加」
     //   不是算错，是没取全。不提示就会被当成数据错误（立兴金属 2,361 种只回 200 种）。
     truncated: !!raw.truncated,
     rowLimit: num(raw.rowLimit),
-    listSubtotal: round2(items.reduce((s, r) => s + r.amount, 0)),
+    listSubtotal: sumMoney(items.map((r) => r.amount)),
   }
 }
 
@@ -1115,7 +1120,10 @@ function toPurchaseLine(it = {}) {
     unitRate: num(it.unit_rate ?? it.unitRate),
     qty,
     price,
-    amount: it.amount != null ? num(it.amount) : round2(qty * price),
+    // ★ 后端没给折后金额时自己算：必须走 money.js（十进制精确 + 半偶），
+    //   早先用 round2()=Math.round 是半进位，与库里 J_JEZK 的 quantize 口径差一分，
+    //   而合计走的是 billState 的 mulMoney ⇒ 逐行相加 ≠ 合计。赠品行 J_JEZK 记 0，兜底也跟着记 0。
+    amount: it.amount != null ? num(it.amount) : (it.gift ? 0 : mulMoney(qty, price)),
     amountHs: num(it.amount_hs ?? it.amountHs),
     priceJh: num(it.price_jh ?? it.priceJh),
     // ★★ 明细行备注：统一读 **`remark`**（第十轮）。Agent 侧 `_map_line` 原先叫
@@ -1249,6 +1257,11 @@ function num(v) {
   const n = Number(v)
   return Number.isFinite(n) ? n : 0
 }
+/**
+ * ★ 只准用于**数量**（对齐厂商的两位小数）。钱不许用它：
+ *   `Math.round` 是半进位，而库里 J_JEZK 是 `Decimal.quantize`（半偶），
+ *   前端合计走 utils/money.js ⇒ 拿它算钱会出现"逐行相加 ≠ 合计"的一分钱差。
+ */
 function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100
 }
